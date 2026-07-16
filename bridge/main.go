@@ -15,7 +15,7 @@ package main
 
 // All offset, trait, and epoch-timestamp parameters (ms on the message
 // callbacks, ns on metrics) are int64_t, never `long`: `long` is 32 bits on
-// LLP64 platforms (Windows), where epoch values do not fit at all and
+// LLP64 platforms (Windows), where epoch values do not fit and
 // offsets/trait bits silently truncate. Fixed-width types make the ABI
 // identical on every platform.
 
@@ -39,7 +39,7 @@ typedef struct {
 
 // err_buf/err_cap/err_len_out let the process callback report WHY it failed:
 // on a non-zero return the callback writes up to err_cap bytes of its error
-// string into err_buf and sets *err_len_out. The bridge then surfaces that
+// string into err_buf and sets *err_len_out. The bridge then reports that
 // text as the dead-letter reason, instead of a synthetic "error code N".
 typedef int (*llingr_process_fn)(
 	const char* key, int key_len,
@@ -182,58 +182,49 @@ import (
 	"github.com/llingr/llingr-nexus/nexus"
 )
 
-// bridgeState holds the consumer lifecycle state.
-// Only one consumer instance per process (Go runtime constraint).
+// bridgeState holds the consumer lifecycle state: one consumer instance per
+// process, because the Go runtime is process-global.
 type bridgeState struct {
 	mu       sync.Mutex
 	consumer consumerHandle
 	cancel   context.CancelFunc
-	// runDone releases llingr_run. The engine's Subscribe returns once
-	// partitions are assigned (the poll loop runs on its own goroutines),
-	// so llingr_run parks on this channel to deliver the documented
-	// blocks-until-shutdown contract. Closed exactly once, by the shutdown
-	// callback (graceful and emergency exits both fire it) and
-	// defensively by the one llingr_stop that drove Shutdown.
+	// runDone parks llingr_run to deliver its blocks-until-shutdown
+	// contract; Subscribe returns once partitions are assigned. Closed
+	// exactly once, by the shutdown callback, and defensively by the
+	// llingr_stop that drove Shutdown.
 	runDone     chan struct{}
 	runDoneOnce sync.Once
-	// stopGateOpen gates the single call to consumer.Shutdown(). The gate
-	// starts CLOSED: a stop() arriving before llingr_run has started the
-	// engine is ignored, and must be. Reaching Shutdown() there would run
-	// the engine's graceful exit and consume its exactly-once shutdown
-	// notification before anything had subscribed, orphaning the exit the
-	// host actually cares about later. llingr_run OPENS the gate just
-	// before Subscribe; the one stop() that closes an open gate is elected
-	// the shutdown driver, and only that caller may cancel the bridge
-	// context and release runDone, so a losing stop can never cut the
-	// winner's drain short. The engine invokes the host shutdown handler
-	// from INSIDE Shutdown(), so the shutdown callback also closes the gate
-	// before the host handler runs; a handler that calls llingr_stop finds
-	// it closed and returns. That re-entrancy is same-goroutine, where a
-	// sync.Once would DEADLOCK (Do holds a mutex across f); the
-	// non-blocking CAS lets the re-entrant caller return instead.
+	// stopGateOpen gates the single call to consumer.Shutdown(). It starts
+	// CLOSED: a stop() before llingr_run is ignored, because a Shutdown()
+	// there would consume the engine's exactly-once shutdown notification
+	// before anything had subscribed. llingr_run opens the gate just
+	// before Subscribe. The one stop() that closes an open gate drives
+	// Shutdown, and only that caller may cancel the bridge context and
+	// release runDone, so a losing stop never cuts the winner's drain
+	// short. The shutdown callback closes the gate before the host handler
+	// runs, so a handler that calls llingr_stop returns without
+	// re-entering Shutdown(). That re-entrancy is same-goroutine, where
+	// sync.Once.Do would deadlock; hence the non-blocking CAS.
 	stopGateOpen atomic.Bool
-	// brokerCleanup releases the broker resources directly (the adapter's
-	// Unsubscribe: leave the consumer group with the outcome surfaced, then
-	// close the client). Used ONLY after an emergency exit, which
-	// bypasses the engine's own Unsubscribe path; see emergencyBrokerCleanup.
+	// brokerCleanup is the adapter's Unsubscribe: leave the consumer
+	// group, then close the client. Used only after an emergency exit,
+	// which bypasses the engine's own Unsubscribe path; see
+	// emergencyBrokerCleanup.
 	brokerCleanup func() error
 }
 
-// initMu serialises llingr_init across concurrent callers WITHOUT holding
-// state.mu across the build. The engine emits build-time logs (the licence
-// notice, adapter setup) synchronously during buildConsumer, and those reach
-// the host log handler; holding state.mu there would deadlock a log handler
-// that called back into llingr_stop/llingr_run/llingr_take_snapshot (all of
-// which take state.mu). state.mu is taken only for the brief state field
-// reads/writes.
+// initMu serialises llingr_init without holding state.mu across the build:
+// the engine logs synchronously during buildConsumer, and a log handler that
+// re-entered llingr_stop, llingr_run, or llingr_take_snapshot would deadlock
+// on state.mu. state.mu is taken only for brief field reads and writes.
 var initMu sync.Mutex
 
 var state bridgeState
 
 // callbackSet is the six registered host callback pointers, published as one
-// immutable unit. Set before llingr_init() (the log callback must be
-// registered before init to capture Build-time engine logs, e.g. the licence
-// notice); registration after a successful init is ignored.
+// immutable unit. Set before llingr_init(), so the log callback captures
+// build-time engine logs such as the licence notice; registration after a
+// successful init is ignored.
 type callbackSet struct {
 	process    C.llingr_process_fn
 	deadletter C.llingr_deadletter_fn
@@ -245,29 +236,24 @@ type callbackSet struct {
 
 // Callback publication and its memory-model contract. A host may register on
 // one OS thread and init/run on another, ordering the two cgo calls only
-// with HOST-side synchronisation (the Rust facade's init lock), which the Go
-// memory model cannot see: each cgo entry is serviced by its own goroutine,
-// and nothing in the documented model orders one entry's plain writes before
-// another's reads (in practice the runtime's cgo entry internals provide the
-// barriers, and the race runtime even merges all cgo crossings via
-// racecgosync, but neither is a documented contract). The bridge therefore
-// supplies its own edge: setters copy-on-write under registrationMu and
-// PUBLISH via registeredCallbacks.Store; every reader (the per-message
-// closures on engine goroutines, emitLog, the build-time enable checks)
-// loads via loadCallbacks. The atomic Store/Load pair is a synchronising
-// pair per the Go memory model, so registration is visible to every engine
-// goroutine regardless of host threading, with no reliance on the host's
-// own ordering.
+// with HOST-side synchronisation, which the Go memory model cannot see: each
+// cgo entry is serviced by its own goroutine, and nothing in the documented
+// model orders one entry's plain writes before another's reads. The bridge
+// therefore supplies its own edge: setters copy-on-write under
+// registrationMu and publish via registeredCallbacks.Store; every reader
+// loads via loadCallbacks. The Store/Load pair is a synchronising pair per
+// the Go memory model, so registration is visible to every engine goroutine
+// regardless of host threading.
 var (
-	// registrationMu serialises the copy-on-write in the llingr_on_* setters
-	// (cold path; concurrent setters must not lose each other's field) and
+	// registrationMu serialises the copy-on-write in the llingr_on_*
+	// setters, so concurrent setters cannot lose each other's field, and
 	// the seal handshake.
 	registrationMu sync.Mutex
-	// callbacksSealed flips on the FIRST SUCCESSFUL llingr_init: from then on
-	// engine goroutines read the callbacks per message, so a late
-	// registration would be a live change under running workers. Sealing
-	// makes it an ignored no-op (reported on stderr) instead. Failed init
-	// attempts do not seal, keeping the retry path re-registerable.
+	// callbacksSealed flips on the FIRST SUCCESSFUL llingr_init: engine
+	// goroutines then read the callbacks per message, so a late
+	// registration is ignored and reported on stderr rather than being a
+	// live change under running workers. Failed inits do not seal, so a
+	// retry can re-register.
 	callbacksSealed atomic.Bool
 	// registeredCallbacks is the published set; nil means nothing registered.
 	registeredCallbacks atomic.Pointer[callbackSet]
@@ -315,13 +301,10 @@ func sealCallbacks() {
 	registrationMu.Unlock()
 }
 
-// abiVersion is the FFI contract version. Bump it on ANY change to an exported
-// function signature or callback typedef. The Rust crate checks it at startup
-// (llingr_abi_version) and refuses to run against a mismatched library, turning
-// a silent ABI-skew memory-safety bug into a clean error.
-//
-// v1 is the first released contract; the unpublished revisions that preceded
-// it were renumbered away, so the released history starts here.
+// abiVersion is the FFI contract version. Increment it on ANY change to an
+// exported function signature or callback typedef. The Rust crate checks it
+// at startup (llingr_abi_version) and refuses to run against a mismatched
+// library, turning a silent ABI-skew memory-safety bug into a clean error.
 const abiVersion = 1
 
 // errBufCap bounds the error text the process callback can report back per
@@ -369,8 +352,8 @@ func llingr_init(configJSON *C.char, configLen C.int, errBuf *C.char, errCap C.i
 	// DemuxConfig, unsafe librdkafka settings). In-process that is a loud
 	// startup failure; across an FFI boundary an unrecovered Go panic kills
 	// the host. Convert to a clean error instead. `cancel` is captured so a
-	// panic during buildConsumer still releases the context and the goroutines
-	// a partial build started, instead of leaking them.
+	// panic during buildConsumer still releases the context and the
+	// goroutines a partial build started.
 	var cancel context.CancelFunc
 	defer func() {
 		if r := recover(); r != nil {
@@ -382,9 +365,7 @@ func llingr_init(configJSON *C.char, configLen C.int, errBuf *C.char, errCap C.i
 		}
 	}()
 
-	// Serialise concurrent init via initMu (NOT state.mu): buildConsumer runs
-	// below without state.mu held, so the engine's synchronous build-time logs
-	// cannot deadlock a log handler that re-enters llingr_stop/run/snapshot.
+	// Serialise concurrent init; see initMu for why not state.mu.
 	initMu.Lock()
 	defer initMu.Unlock()
 
@@ -403,10 +384,8 @@ func llingr_init(configJSON *C.char, configLen C.int, errBuf *C.char, errCap C.i
 		return C.int(berr.code)
 	}
 
-	// One Info line records the build variant where it matters most: the
-	// running deployment's log stream (no-op without a log callback). Emitted
-	// before buildConsumer so an adapter-not-compiled error is preceded by
-	// the list of adapters that ARE present.
+	// Log the compiled adapters before buildConsumer, so an
+	// adapter-not-compiled error is preceded by what IS present.
 	variant := strings.Join(compiledAdapters, ", ")
 	if variant == "" {
 		variant = "none (stub-only build)"
@@ -416,8 +395,6 @@ func llingr_init(configJSON *C.char, configLen C.int, errBuf *C.char, errCap C.i
 	ctx, c := context.WithCancel(context.Background())
 	cancel = c
 
-	// buildConsumer runs under initMu only. Its build-time engine logs reach
-	// the host log handler without state.mu held.
 	consumer, brokerCleanup, berr := buildConsumer(ctx, cfg)
 	if berr != nil {
 		cancel()
@@ -431,13 +408,10 @@ func llingr_init(configJSON *C.char, configLen C.int, errBuf *C.char, errCap C.i
 	state.brokerCleanup = brokerCleanup
 	state.runDone = make(chan struct{})
 	state.mu.Unlock()
-	// Close callback registration: the engine now reads the set per message
-	// from its own goroutines, so a later llingr_on_* would be a live change
-	// under running workers (see callbacksSealed).
+	// Close callback registration (see callbacksSealed).
 	sealCallbacks()
-	// The context now belongs to state; the panic recovery above must not
-	// cancel the running engine's context on any later (currently impossible)
-	// panic.
+	// The context now belongs to state; the panic recovery must not cancel
+	// the running engine's context.
 	cancel = nil
 	return 0
 }
@@ -457,7 +431,7 @@ func signalRunDone() {
 //export llingr_run
 func llingr_run() (rc C.int) {
 	// Recover panics at the FFI boundary. An unrecovered Go panic calls
-	// runtime.exit(2), which kills the entire host process (Rust/Python).
+	// runtime.exit(2), which kills the entire host process.
 	defer func() {
 		if r := recover(); r != nil {
 			fmt.Fprintf(os.Stderr, "llingr: recovered panic in llingr_run: %v\n", r)
@@ -474,18 +448,13 @@ func llingr_run() (rc C.int) {
 		return -1 // not initialised
 	}
 
-	// Open the stop gate: from here a stop() is honoured. Opened BEFORE
-	// Subscribe so a stop() racing startup still stops the engine rather
-	// than being lost; a stop() that arrived before this point was ignored
-	// (nothing was consuming yet).
+	// Open the stop gate BEFORE Subscribe, so a stop() racing startup
+	// still stops the engine rather than being lost.
 	state.stopGateOpen.Store(true)
 
-	// Subscribe returns once the group join completes and partitions are
-	// assigned (or errors on the assignment timeout); the poll loop runs on
-	// engine goroutines, NOT this thread. Park here until the engine's
-	// shutdown callback fires, so llingr_run delivers the documented
-	// blocks-until-shutdown contract: a host whose main thread sits in
-	// run() keeps consuming until stop() or an emergency shutdown.
+	// Subscribe returns once partitions are assigned; the poll loop runs
+	// on engine goroutines, NOT this thread. Park until the shutdown
+	// callback fires: the documented blocks-until-shutdown contract.
 	if err := consumer.Subscribe(); err != nil {
 		return -2
 	}
@@ -495,15 +464,13 @@ func llingr_run() (rc C.int) {
 
 //export llingr_take_snapshot
 func llingr_take_snapshot() (out *C.char) {
-	// A point-in-time view of the consumer's state (the engine's
-	// Consumer.TakeSnapshot, safe from any goroutine), marshalled to the
-	// same JSON document the Go SnapshotHandler serves. Returns NULL when
-	// the engine is not initialised or marshalling fails; the caller owns
-	// the returned string and must release it with llingr_free_string.
-	//
-	// Recover panics at the FFI boundary: this export is documented for
-	// mounting on an operational HTTP route, where an engine panic during
-	// snapshotting must surface as a NULL response, not kill the host.
+	// The engine's Consumer.TakeSnapshot, safe from any goroutine,
+	// marshalled to the same JSON document the Go SnapshotHandler serves.
+	// Returns NULL when the engine is not initialised or marshalling
+	// fails; the caller releases the string with llingr_free_string.
+	// Panics are recovered: this export is documented for an operational
+	// HTTP route, where a snapshot panic must produce NULL, not kill the
+	// host.
 	defer func() {
 		if r := recover(); r != nil {
 			fmt.Fprintf(os.Stderr, "llingr: recovered panic in llingr_take_snapshot: %v\n", r)
@@ -527,7 +494,7 @@ func llingr_take_snapshot() (out *C.char) {
 }
 
 // marshalSnapshot renders the snapshot exactly as the engine's HTTP handler
-// does (snapshot.NewHandler json-encodes the same struct), so the document a
+// does; snapshot.NewHandler json-encodes the same struct, so the document a
 // Rust application serves is byte-compatible with the Go one.
 func marshalSnapshot(snap snapshot.Snapshot) (string, error) {
 	data, err := json.Marshal(snap)
@@ -546,9 +513,7 @@ func llingr_free_string(s *C.char) {
 
 //export llingr_stop
 func llingr_stop() {
-	// Recover panics at the FFI boundary (same rationale as llingr_run): an
-	// unrecovered Go panic in Shutdown would kill the host process instead
-	// of failing the one call.
+	// Recover panics at the FFI boundary; same rationale as llingr_run.
 	defer func() {
 		if r := recover(); r != nil {
 			fmt.Fprintf(os.Stderr, "llingr: recovered panic in llingr_stop: %v\n", r)
@@ -564,23 +529,17 @@ func llingr_stop() {
 		return
 	}
 
-	// Drive the engine's Shutdown at most once: only the stop() that closes
-	// an OPEN gate proceeds. Every other caller simply gives up: it arrived
-	// before run() opened the gate (nothing consuming yet), after shutdown
-	// already began (a lost concurrent race, a re-entrant call from the
-	// shutdown handler, or an emergency exit), and it must not cancel
-	// the context or touch runDone while the winner may still be draining.
-	// See stopGateOpen for why this is a CAS and not a sync.Once.
+	// Only the stop() that closes an OPEN gate drives Shutdown. Every
+	// other caller returns, and must not cancel the context or touch
+	// runDone while the winner may still be draining. See stopGateOpen.
 	if !state.stopGateOpen.CompareAndSwap(true, false) {
 		return
 	}
 
-	// Only this goroutine backstops runDone (the shutdown callback normally
-	// closes it post-drain; this covers Shutdown panicking or returning
-	// before invoking the callback) and cancels the bridge context, strictly
-	// AFTER Shutdown has finished so the drain's final commit is never cut
-	// short. Deferred (LIFO: cancel, then runDone) so a Shutdown panic still
-	// releases both.
+	// Backstop runDone, which the shutdown callback normally closes, and
+	// cancel the bridge context strictly AFTER Shutdown has finished, so
+	// the drain's final commit is never cut short. Deferred so a Shutdown
+	// panic still releases both; the LIFO order runs cancel first.
 	defer signalRunDone()
 	defer func() {
 		if cancel != nil {
@@ -602,13 +561,11 @@ func llingr_emergency_stop(reason *C.char, reasonLen C.int) {
 // emergencyStop forwards the host's emergency-stop request to the engine:
 // abandon in-flight work and stop now, no drain, no final commit. The stop
 // gate is deliberately not consulted: the engine's emergency path is safe
-// from any lifecycle state and elects its own single deliverer, so the
-// bridge forwards unconditionally. The shutdown callback then fires exactly
-// once with this reason and runs the usual emergency seam (gate closed,
-// broker released, a parked llingr_run released). Before llingr_init there
-// is no consumer and the call is a no-op.
+// from any lifecycle state and elects its own single deliverer. The
+// shutdown callback then fires exactly once with this reason. Before
+// llingr_init there is no consumer and the call is a no-op.
 func emergencyStop(reason string) {
-	// Recover panics at the FFI boundary (same rationale as llingr_stop).
+	// Recover panics at the FFI boundary; same rationale as llingr_stop.
 	defer func() {
 		if r := recover(); r != nil {
 			fmt.Fprintf(os.Stderr, "llingr: recovered panic in llingr_emergency_stop: %v\n", r)
@@ -697,9 +654,9 @@ type recordMeta struct {
 	headers  []bridgeHeader
 }
 
-// marshalHeaders packs headers into ONE C allocation (the llingr_header array
-// followed by the key/value bytes its pointers reference), so a message with
-// headers costs a single malloc/free rather than one per field. Returns
+// marshalHeaders packs headers into ONE C allocation, the llingr_header
+// array followed by the key/value bytes its pointers reference, so a message
+// with headers costs a single malloc/free rather than one per field. Returns
 // (nil, 0, no-op) when there are none. value_len == -1 marks a null value.
 //
 // The returned pointers reference C memory only; no Go pointer is stored in
@@ -753,7 +710,7 @@ func marshalHeaders(headers []bridgeHeader) (*C.llingr_header, C.int, func()) {
 }
 
 // marshalValue prepares the record value for the process and dead-letter
-// callbacks. A nil slice is a null value (a tombstone on a compacted topic):
+// callbacks. A nil slice is a null value, a tombstone on a compacted topic:
 // value_len == -1, mirroring the header convention, so the host can
 // distinguish "delete this key" from an empty payload (value_len == 0). The
 // returned pointer aliases the slice's backing array; the caller's message
@@ -772,12 +729,12 @@ func marshalValue(value []byte) (*C.char, C.int) {
 // makeProcessMessage returns a nexus.ProcessMessage[T] that forwards each
 // message to the registered C function pointer.
 //
-// Key, partition, and offset come from the nexus envelope: both adapters
-// guarantee the key is UTF-8-safe (raw if valid UTF-8, base64 if binary,
-// partition number if absent), and this respects the adapter's canonical
-// extraction rather than re-implementing it per payload type. valueOf pulls
-// the raw value bytes from the adapter-native payload; metaOf pulls the
-// timestamp and headers from it.
+// Key, partition, and offset come from the nexus envelope: the adapter
+// guarantees the key is UTF-8-safe, raw if valid, base64 if binary, the
+// partition number if absent, and this respects that canonical extraction
+// rather than re-implementing it per payload type. valueOf pulls the raw
+// value bytes from the adapter-native payload; metaOf pulls the timestamp
+// and headers from it.
 func makeProcessMessage[T any](valueOf func(T) []byte, metaOf func(T) recordMeta) nexus.ProcessMessage[T] {
 	return func(_ context.Context, msg *nexus.Message[T]) error {
 		fn := loadCallbacks().process
@@ -811,15 +768,15 @@ func makeProcessMessage[T any](valueOf func(T) []byte, metaOf func(T) recordMeta
 			&errBuf[0], C.int(errBufCap), &errLen,
 		)
 
-		// Apply custom traits returned by the host callback (bits 10-63)
+		// Apply custom traits returned by the host callback (bits 10-63).
 		if traitsOut != 0 {
 			msg.AddCustomTraits(nexus.Traits(traitsOut))
 		}
 
 		if rc != 0 {
-			// Surface the callback's own error text (rides the engine's
-			// reason plumbing to the dead-letter handler). Fall back to a
-			// synthetic message only if the callback wrote nothing.
+			// The callback's own error text rides the engine's reason
+			// plumbing to the dead-letter handler; a synthetic message
+			// only if the callback wrote nothing.
 			if errLen > 0 {
 				return errors.New(C.GoStringN(&errBuf[0], errLen))
 			}
@@ -871,10 +828,8 @@ func makeWriteDeadLetter[T any](valueOf func(T) []byte, metaOf func(T) recordMet
 }
 
 // metricsSinkCallback returns a nexus.MetricsSink that forwards
-// per-message metrics to the registered C function pointer.
-//
-// All timing fields from nexus.Metrics are forwarded as nanoseconds,
-// matching the gRPC bridge's callback_metrics_sink.go pattern.
+// per-message metrics to the registered C function pointer. All timing
+// fields from nexus.Metrics are forwarded as nanoseconds.
 func metricsSinkCallback() nexus.MetricsSink {
 	return func(_ nexus.SinkContext, metrics nexus.Metrics) error {
 		fn := loadCallbacks().metrics
@@ -900,7 +855,7 @@ func metricsSinkCallback() nexus.MetricsSink {
 
 // bandwidthSink returns a nexus.BandwidthMetricsSink forwarding each flushed
 // packet to the registered C callback, flattened into C-allocated arrays.
-// C allocation is required by the cgo pointer rules: the structs carry
+// C allocation is required by the cgo pointer rules: the structs contain
 // string pointers, and Go memory containing Go pointers must not be passed
 // to C. The sink runs on the aggregator's flush cadence, well off the
 // message hot path, so the per-flush allocations are irrelevant.
@@ -985,23 +940,22 @@ func bandwidthSink() nexus.BandwidthMetricsSink {
 func shutdownCallback() nexus.ShutdownCallback {
 	return func(_ context.Context, reason error) {
 		// The engine delivers this exactly once, on whichever exit happens
-		// first (graceful Shutdown or an emergency exit), from inside its
-		// shutdown sequence. Close the stop gate BEFORE running the host
-		// handler, so a handler that calls llingr_stop finds it closed and
-		// does not re-enter Shutdown() (see llingr_stop).
+		// first, graceful or emergency. Close the stop gate BEFORE running
+		// the host handler, so a handler that calls llingr_stop does not
+		// re-enter Shutdown().
 		state.stopGateOpen.Store(false)
 
-		// Release the parked llingr_run AFTER the host's shutdown handler ran
-		// (and, on an emergency exit, after the broker is released), so run()
-		// returning is the last event the host observes.
+		// Release the parked llingr_run AFTER the host's shutdown handler
+		// ran, and on an emergency exit after the broker is released, so
+		// run() returning is the last event the host observes.
 		defer signalRunDone()
 
 		// An emergency exit (non-nil reason) bypasses the engine's
-		// Unsubscribe path entirely: nothing has left the consumer group or
-		// closed the broker client, and stop() will not drive Shutdown (gate
-		// closed). Release the broker here, after the host handler has run.
-		// A graceful Shutdown never takes this branch; its drain already
-		// released the broker.
+		// Unsubscribe path: nothing has left the consumer group or closed
+		// the broker client, and stop() will not drive Shutdown through
+		// the closed gate. Release the broker here, after the host handler
+		// has run. A graceful Shutdown never takes this branch; its drain
+		// already released the broker.
 		if reason != nil {
 			defer emergencyBrokerCleanup()
 		}
@@ -1023,15 +977,15 @@ func shutdownCallback() nexus.ShutdownCallback {
 	}
 }
 
-// emergencyBrokerCleanup leaves the consumer group (outcome surfaced) and
-// closes the broker client after an emergency exit, where the engine's
-// own Unsubscribe cleanup never ran; without it the client stays connected and
-// the group only evicts this member at session timeout. No bridge-side once
-// guard: the engine delivers the shutdown notification exactly once, and both
-// adapters guard Unsubscribe internally, so an engine-side unsubscribe still
-// in flight (a timed-out drain that later completes) cannot double-free. Also
-// cancels the bridge context, which no stop() will do on this path (the gate
-// is already closed).
+// emergencyBrokerCleanup leaves the consumer group and closes the broker
+// client after an emergency exit, where the engine's own Unsubscribe cleanup
+// never ran; without it the client stays connected and the group only evicts
+// this member at session timeout. No bridge-side once guard: the engine
+// delivers the shutdown notification exactly once, and the adapter guards
+// Unsubscribe internally, so an engine-side unsubscribe still in flight,
+// such as a timed-out drain that later completes, cannot double-free. Also
+// cancels the bridge context, which no stop() will do through the closed
+// gate.
 func emergencyBrokerCleanup() {
 	state.mu.Lock()
 	cleanup := state.brokerCleanup
@@ -1044,7 +998,7 @@ func emergencyBrokerCleanup() {
 	if cleanup == nil {
 		return
 	}
-	// This runs on an engine goroutine (the emergency exit's notifier); a
+	// This runs on an engine goroutine, the emergency exit's notifier; a
 	// panic here would kill the host process, so contain it like the
 	// exported entry points do.
 	defer func() {

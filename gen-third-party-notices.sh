@@ -4,7 +4,7 @@
 #
 # Generates the THIRD-PARTY-NOTICES file from the Go modules actually compiled
 # into the engine archive, so the notices shipped beside an artifact always
-# match that artifact exactly and a dependency bump can never leave the notices
+# match that artifact exactly and a dependency update can never leave the notices
 # stale.
 #
 # Why this exists: llingr-kafka links the Go engine statically (go build
@@ -18,12 +18,12 @@
 # alongside any binary built from this crate.
 #
 # The module set is enumerated from the bridge source with `go list -deps`, not
-# from `go version -m` of the built library: a c-archive (.a) carries no
+# from `go version -m` of the built library: a c-archive (.a) contains no
 # buildinfo that `go version -m` can read (it works only on Go executables and
 # c-shared libraries), whereas `go list -deps .` reports precisely the modules
 # whose packages are compiled into the archive, and needs no built artifact.
 #
-# Regenerate after every engine bump (the pinned Go module versions in
+# Regenerate after every engine update (the pinned Go module versions in
 # bridge/go.mod change), then commit the refreshed THIRD-PARTY-NOTICES.
 #
 # Usage: gen-third-party-notices.sh <bridge-dir> <output>

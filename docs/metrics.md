@@ -30,15 +30,15 @@ let (metrics, handle): (Metrics, MetricsHandle) = Metrics::registry();
 You pass the `Metrics` value to the engine builder's `.metrics(...)` hook. What
 each mode does:
 
-- **`Metrics::serve(addr, path)`** binds `addr` (for example `"0.0.0.0:9464"`)
-  and answers `GET path` (for example `"/metrics"`) with the OpenMetrics text on
+- **`Metrics::serve(addr, path)`** binds `addr`, for example `"0.0.0.0:9464"`,
+  and answers `GET path`, for example `"/metrics"`, with the OpenMetrics text on
   a dedicated thread. A non-GET request to the path gets `405`, any other path
   gets `404`. The bind happens when the engine is built, so an unbindable
   address is a clean build-time error naming the address; the endpoint then
   serves for the life of the engine.
 - **`Metrics::registry()`** runs no server. It returns the `Metrics` value and a
   `MetricsHandle`. The handle is cheap to clone and safe to call from any thread
-  at scrape frequency (it is `Clone`, and `Send + Sync`), and its
+  at scrape frequency, being `Clone` and `Send + Sync`, and its
   `scrape() -> String` method renders the current exposition on demand. Before
   the engine is built the handle serves an empty exposition (zero series), so you
   can mount the route unconditionally and it simply starts returning data once
@@ -47,15 +47,15 @@ each mode does:
 The engine wiring that realises the registry at build time (registering the
 sinks, binding the endpoint in serve mode) lands with the engine module; the
 metrics module itself, the sinks, the scrape rendering, and the `serve`/`registry`
-surface described here are complete in the crate today.
+modes described here are complete in the crate today.
 
 ## Mounting the handle on your own server
 
 When you already run an HTTP server, use registry mode and serve the handle's
 output yourself. Set the response content type to the exposition's media type,
-which the crate exposes as the `OPENMETRICS_CONTENT_TYPE` constant
-(`"application/openmetrics-text; version=1.0.0; charset=utf-8"`, matching what
-Go's `promhttp` serves and what scrapers expect). The essential shape, framework
+which the crate exposes as the `OPENMETRICS_CONTENT_TYPE` constant,
+`"application/openmetrics-text; version=1.0.0; charset=utf-8"`, matching what
+Go's `promhttp` serves and what scrapers expect. The essential code, framework
 free, is just this:
 
 ```rust
@@ -75,8 +75,8 @@ fn metrics_response(handle: &MetricsHandle) -> (&'static str, String) {
 ```
 
 In a real web framework it is the same two values wired into a route. For
-example, with axum (illustrative, and not compiled by the docs check because it
-would pull in the framework):
+example, with axum, illustrative and not compiled by the docs check because
+that would add the framework as a harness dependency:
 
 ```rust,ignore
 use axum::{routing::get, Router, http::header::CONTENT_TYPE};
@@ -95,7 +95,7 @@ fn metrics_router(handle: MetricsHandle) -> Router {
 
 ## The per-message metric catalogue
 
-Every per-message series is named `llingr_engine_*` and carries the same five
+Every per-message series is named `llingr_engine_*` and has the same five
 labels: `topic`, `consumer_group`, `service`, `team`, and `partition`. The
 `service` and `team` labels come from the service identity you attach with the
 builder's optional `.service(name, team)` method; with none set they are empty
@@ -114,11 +114,11 @@ names end `_total`):
 | `llingr_engine_used_overflow_total` | The message dispatched via the guard-channel overflow path during worker acquisition (framework trait bit 5) |
 
 The five condition counters each increment independently, so more than one can
-fire for a single message (a message that errored and then dead-lettered
-increments both plus `processed_total`). This is the only place framework trait
-bits surface. The other framework bits (CommitBuffered, Orphaned,
-FirstAfterRebalance) have no metric, and the application trait bits you set
-(positions 10 to 63) surface nowhere: they are not counters and not labels. See
+fire for a single message: a message that errored and then dead-lettered
+increments both plus `processed_total`. This is the only place framework trait
+bits appear. The other framework bits, CommitBuffered, Orphaned, and
+FirstAfterRebalance, have no metric, and the application trait bits you set at
+positions 10 to 63 appear nowhere: they are not counters and not labels. See
 `docs/processing.md` for the full trait-bit picture and the consequence that
 custom bits are effectively write-only in this crate.
 
@@ -138,9 +138,9 @@ is strictly positive):
 | `llingr_engine_dead_letter_duration_seconds` | Time spent in the dead-letter handler | Same as process: 1ms doubling over 15 buckets |
 | `llingr_engine_queue_wait_duration_seconds` | Time a message waited in the queue before processing (process-start minus read time, when both are set and positive) | Exponential, 0.1ms doubling over 18 buckets (0.1ms to about 13.1s) |
 
-The bucket layouts are pinned to the Go engine's own (`ExponentialBuckets(0.001,
-2, 15)` for the process and dead-letter histograms, `ExponentialBuckets(0.0001,
-2, 18)` for queue-wait), so the Rust exposition and the Go engine's own reporting
+The bucket layouts are pinned to the Go engine's own, `ExponentialBuckets(0.001,
+2, 15)` for the process and dead-letter histograms and `ExponentialBuckets(0.0001,
+2, 18)` for queue-wait, so the Rust exposition and the Go engine's own reporting
 line up bucket for bucket.
 
 ## Bandwidth telemetry

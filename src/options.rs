@@ -3,10 +3,10 @@
 
 //! Typed Kafka client options ([`Options`]).
 //!
-//! The engine's broker layer (franz-go, pure Go) accepts a curated set of
+//! The engine's pure-Go broker layer, franz-go, accepts a curated set of
 //! Kafka client options, each translated by the bridge into a typed franz-go
-//! option, plus the full TLS/SASL security surface (PLAIN, SCRAM-SHA-256/512,
-//! TLS and mTLS). This builder makes that set discoverable at compile time.
+//! option, plus the full TLS/SASL security options: PLAIN, SCRAM-SHA-256/512,
+//! TLS and mTLS. This builder makes that set discoverable at compile time.
 //! An option outside the curated set fails engine initialisation with the
 //! full supported-key list, never a silent no-op.
 //!
@@ -50,14 +50,44 @@ impl SaslMechanism {
     }
 }
 
+/// The SASL configuration selected on an [`Options`] builder. PLAIN and SCRAM
+/// hold a username/password; AWS_MSK_IAM, OAUTHBEARER, and GCP IAM hold no
+/// static credentials, resolving through the AWS provider chain, the OIDC
+/// token endpoint, and Application Default Credentials respectively.
+#[derive(Clone)]
+enum Sasl {
+    UserPass {
+        mechanism: SaslMechanism,
+        username: String,
+        password: String,
+    },
+    AwsMskIam {
+        region: Option<String>,
+        profile: Option<String>,
+        role_arn: Option<String>,
+        role_session_name: Option<String>,
+    },
+    OauthbearerOidc {
+        token_endpoint: String,
+        client_id: String,
+        client_secret: String,
+        scope: Option<String>,
+        extensions: Vec<(String, String)>,
+    },
+    GcpIam {
+        principal: Option<String>,
+        credentials_file: Option<String>,
+    },
+}
+
 /// Consumer-group partition assignment strategy
 /// (`partition.assignment.strategy`).
 ///
 /// [`CooperativeSticky`](Self::CooperativeSticky) is the default and the
 /// recommended choice for new deployments: rebalances revoke only the
-/// partitions that actually move. The other three are eager protocols (every
-/// rebalance revokes the whole assignment), provided for joining consumer
-/// groups whose members do not all speak cooperative-sticky yet.
+/// partitions that actually move. The other three are eager protocols, where
+/// every rebalance revokes the whole assignment, provided for joining
+/// consumer groups whose members do not all speak cooperative-sticky yet.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BalanceStrategy {
     /// Incremental (cooperative) rebalancing; only affected partitions are
@@ -115,19 +145,19 @@ impl ClientLogLevel {
 /// Typed option builder for the Kafka client.
 ///
 /// The security setters compute `security.protocol` automatically: any `tls_*`
-/// setter (or [`tls`](Self::tls)) enables TLS, any `sasl_*` setter enables
-/// SASL, and the emitted protocol is the resulting combination (`ssl`,
-/// `sasl_plaintext`, or `sasl_ssl`).
+/// setter or [`tls`](Self::tls) enables TLS, any `sasl_*` setter enables
+/// SASL, and the emitted protocol is the resulting combination: `ssl`,
+/// `sasl_plaintext`, or `sasl_ssl`.
 ///
-/// `Duration`-valued setters emit whole milliseconds (the granularity of
-/// every Kafka client timing option); a sub-millisecond remainder rounds up,
+/// `Duration`-valued setters emit whole milliseconds, the granularity of
+/// every Kafka client timing option; a sub-millisecond remainder rounds up,
 /// so a non-zero `Duration` never silently becomes zero.
 #[derive(Clone, Default)]
 pub struct Options {
     entries: Vec<(String, String)>,
     tls: bool,
     ssl_entries: Vec<(String, String)>,
-    sasl: Option<(SaslMechanism, String, String)>,
+    sasl: Option<Sasl>,
 }
 
 impl Options {
@@ -324,7 +354,7 @@ impl Options {
     // -- poll-error resilience ------------------------------------------------
 
     /// How long a partition may fail continuously before the engine stops
-    /// itself with an emergency shutdown carrying the reason
+    /// itself with an emergency shutdown reporting the reason
     /// (`llingr.poll.error.bail.after.ms`; default 10 minutes). Zero
     /// disables the bail entirely; a non-zero value must be between
     /// 1 minute and 1 hour or engine initialisation fails.
@@ -359,7 +389,7 @@ impl Options {
 
     // -- TLS ------------------------------------------------------------------
 
-    /// Enable TLS with the system trust roots (no client certificate).
+    /// Enable TLS with the system trust roots and no client certificate.
     /// Implied by every other `tls_*` setter; call this alone when the broker
     /// certificate chains to a public CA.
     pub fn tls(mut self) -> Self {
@@ -409,43 +439,211 @@ impl Options {
 
     // -- SASL -----------------------------------------------------------------
 
-    /// Authenticate with SASL/PLAIN. Combine with a `tls_*` setter (or
-    /// [`tls`](Self::tls)) so credentials never travel unencrypted.
+    /// Authenticate with SASL/PLAIN. Combine with a `tls_*` setter or
+    /// [`tls`](Self::tls) so credentials never travel unencrypted.
     pub fn sasl_plain(mut self, username: &str, password: &str) -> Self {
-        self.sasl = Some((
-            SaslMechanism::Plain,
-            username.to_string(),
-            password.to_string(),
-        ));
+        self.sasl = Some(Sasl::UserPass {
+            mechanism: SaslMechanism::Plain,
+            username: username.to_string(),
+            password: password.to_string(),
+        });
         self
     }
 
     /// Authenticate with SASL/SCRAM-SHA-256.
     pub fn sasl_scram_sha256(mut self, username: &str, password: &str) -> Self {
-        self.sasl = Some((
-            SaslMechanism::ScramSha256,
-            username.to_string(),
-            password.to_string(),
-        ));
+        self.sasl = Some(Sasl::UserPass {
+            mechanism: SaslMechanism::ScramSha256,
+            username: username.to_string(),
+            password: password.to_string(),
+        });
         self
     }
 
     /// Authenticate with SASL/SCRAM-SHA-512.
     pub fn sasl_scram_sha512(mut self, username: &str, password: &str) -> Self {
-        self.sasl = Some((
-            SaslMechanism::ScramSha512,
-            username.to_string(),
-            password.to_string(),
-        ));
+        self.sasl = Some(Sasl::UserPass {
+            mechanism: SaslMechanism::ScramSha512,
+            username: username.to_string(),
+            password: password.to_string(),
+        });
+        self
+    }
+
+    // -- AWS_MSK_IAM ------------------------------------------------------------
+
+    /// Authenticate to Amazon MSK with IAM (`sasl.mechanism=AWS_MSK_IAM`).
+    ///
+    /// No static credentials are configured here: the engine resolves them
+    /// Go-side with the AWS SDK's default provider chain of environment
+    /// variables, shared config/profile, STS assume-role, web identity/IRSA,
+    /// and EC2 instance metadata. This setter enables TLS automatically, because
+    /// MSK IAM is TLS-only; layer a `tls_*` setter on top only to pin a
+    /// specific CA. Refine the chain with the `aws_*` setters below.
+    pub fn sasl_aws_msk_iam(mut self) -> Self {
+        self.tls = true; // MSK IAM is TLS-only; force sasl_ssl.
+        self.sasl = Some(Sasl::AwsMskIam {
+            region: None,
+            profile: None,
+            role_arn: None,
+            role_session_name: None,
+        });
+        self
+    }
+
+    /// Set the AWS region for the credential provider chain (`aws.region`).
+    /// Optional; without it the chain uses `AWS_REGION` / the shared config.
+    /// This steers the credential/STS region, not the SigV4 signing region,
+    /// which franz-go derives from the broker hostname.
+    /// Only meaningful after [`sasl_aws_msk_iam`](Self::sasl_aws_msk_iam).
+    pub fn aws_region(mut self, region: &str) -> Self {
+        if let Some(Sasl::AwsMskIam { region: r, .. }) = &mut self.sasl {
+            *r = Some(region.to_string());
+        }
+        self
+    }
+
+    /// Select a shared-config profile for the credential provider chain
+    /// (`aws.profile`). Optional. Only meaningful after
+    /// [`sasl_aws_msk_iam`](Self::sasl_aws_msk_iam).
+    pub fn aws_profile(mut self, profile: &str) -> Self {
+        if let Some(Sasl::AwsMskIam { profile: p, .. }) = &mut self.sasl {
+            *p = Some(profile.to_string());
+        }
+        self
+    }
+
+    /// Assume an IAM role on top of the base credential chain
+    /// (`aws.role.arn`, with an optional `aws.role.session.name`). Optional.
+    /// Only meaningful after [`sasl_aws_msk_iam`](Self::sasl_aws_msk_iam).
+    pub fn aws_assume_role(mut self, role_arn: &str, session_name: Option<&str>) -> Self {
+        if let Some(Sasl::AwsMskIam {
+            role_arn: arn,
+            role_session_name: name,
+            ..
+        }) = &mut self.sasl
+        {
+            *arn = Some(role_arn.to_string());
+            *name = session_name.map(str::to_string);
+        }
+        self
+    }
+
+    // -- OAUTHBEARER (OIDC client-credentials) ----------------------------------
+
+    /// Authenticate with SASL/OAUTHBEARER using the OAuth 2.0 client-
+    /// credentials grant (`sasl.mechanism=OAUTHBEARER`). The engine fetches a
+    /// token from `token_endpoint_url` with `client_id`/`client_secret`,
+    /// caches it, and refreshes before expiry.
+    ///
+    /// This does NOT enable TLS on its own: OAUTHBEARER is permitted over
+    /// `sasl_plaintext` for test clusters. Production deployments should
+    /// add a `tls_*` setter so the bearer token never travels unencrypted.
+    /// Add an audience/scope with [`oauthbearer_scope`](Self::oauthbearer_scope)
+    /// and IdP extensions with
+    /// [`oauthbearer_extensions`](Self::oauthbearer_extensions).
+    pub fn sasl_oauthbearer_oidc(
+        mut self,
+        token_endpoint_url: &str,
+        client_id: &str,
+        client_secret: &str,
+    ) -> Self {
+        self.sasl = Some(Sasl::OauthbearerOidc {
+            token_endpoint: token_endpoint_url.to_string(),
+            client_id: client_id.to_string(),
+            client_secret: client_secret.to_string(),
+            scope: None,
+            extensions: Vec::new(),
+        });
+        self
+    }
+
+    /// Set the OAuth scope requested from the token endpoint
+    /// (`sasl.oauthbearer.scope`). Optional. Only meaningful after
+    /// [`sasl_oauthbearer_oidc`](Self::sasl_oauthbearer_oidc).
+    pub fn oauthbearer_scope(mut self, scope: &str) -> Self {
+        if let Some(Sasl::OauthbearerOidc { scope: s, .. }) = &mut self.sasl {
+            *s = Some(scope.to_string());
+        }
+        self
+    }
+
+    /// Set SASL/OAUTHBEARER extensions (`sasl.oauthbearer.extensions`), the
+    /// key/value pairs some brokers require, for example Confluent Cloud's
+    /// `logicalCluster` and `identityPoolId`. Optional. Only meaningful
+    /// after [`sasl_oauthbearer_oidc`](Self::sasl_oauthbearer_oidc).
+    pub fn oauthbearer_extensions<K, V>(mut self, pairs: impl IntoIterator<Item = (K, V)>) -> Self
+    where
+        K: Into<String>,
+        V: Into<String>,
+    {
+        if let Some(Sasl::OauthbearerOidc { extensions, .. }) = &mut self.sasl {
+            *extensions = pairs
+                .into_iter()
+                .map(|(k, v)| (k.into(), v.into()))
+                .collect();
+        }
+        self
+    }
+
+    // -- GCP IAM (Google Cloud Managed Service for Apache Kafka) -----------------
+
+    /// Authenticate to Google Cloud Managed Service for Apache Kafka with IAM
+    /// (`sasl.mechanism=OAUTHBEARER`, `sasl.oauthbearer.method=gcp`).
+    ///
+    /// The wire mechanism is standard OAUTHBEARER; the engine synthesises the
+    /// bearer token Google's service expects from Application Default
+    /// Credentials, whether an environment key file, gcloud user credentials,
+    /// workload identity, or GCE metadata, matching Google's own reference
+    /// clients. No
+    /// credentials are configured here and none cross the FFI. This setter
+    /// enables TLS automatically, because Google's service is TLS-only.
+    ///
+    /// The token's principal, the authenticating identity's email, is derived
+    /// from the credentials where possible; set it explicitly with
+    /// [`gcp_principal`](Self::gcp_principal) when the credential source does
+    /// not include it, as GCE metadata credentials do not, or use Google's
+    /// `GOOGLE_MANAGED_KAFKA_AUTH_PRINCIPAL` environment variable.
+    pub fn sasl_gcp_iam(mut self) -> Self {
+        self.tls = true; // Google's managed Kafka is TLS-only; force sasl_ssl.
+        self.sasl = Some(Sasl::GcpIam {
+            principal: None,
+            credentials_file: None,
+        });
+        self
+    }
+
+    /// Set the GCP principal for the token's subject claim (`gcp.principal`):
+    /// the authenticating identity's email. Optional when the credential
+    /// source includes it, as service account key files do. Only meaningful
+    /// after [`sasl_gcp_iam`](Self::sasl_gcp_iam).
+    pub fn gcp_principal(mut self, principal: &str) -> Self {
+        if let Some(Sasl::GcpIam { principal: p, .. }) = &mut self.sasl {
+            *p = Some(principal.to_string());
+        }
+        self
+    }
+
+    /// Use an explicit service account key JSON file instead of Application
+    /// Default Credentials (`gcp.credentials.file`). Optional. Only
+    /// meaningful after [`sasl_gcp_iam`](Self::sasl_gcp_iam).
+    pub fn gcp_credentials_file(mut self, path: &str) -> Self {
+        if let Some(Sasl::GcpIam {
+            credentials_file: f,
+            ..
+        }) = &mut self.sasl
+        {
+            *f = Some(path.to_string());
+        }
         self
     }
 
     // -- string escape hatch ----------------------------------------------------
 
     /// Add a Kafka client option as an librdkafka-style key/value pair: the
-    /// escape hatch for curated string keys the typed setters do not cover
-    /// (for example `isolation.level`, `security.protocol`,
-    /// `ssl.endpoint.identification.algorithm`).
+    /// escape hatch for curated string keys the typed setters do not cover,
+    /// for example `isolation.level`, `security.protocol`, and
+    /// `ssl.endpoint.identification.algorithm`.
     ///
     /// Keys are translated by the engine into typed franz-go options at
     /// initialisation. An unknown key FAILS initialisation with the full
@@ -454,8 +652,8 @@ impl Options {
     /// as one unit, so conflicting protocol/credential combinations are
     /// initialisation errors with specific messages.
     ///
-    /// Repeating a key is allowed and deterministic: the LAST write wins
-    /// (the layered-config idiom), applied across typed setters and string
+    /// Repeating a key is allowed and deterministic: the LAST write wins,
+    /// as in layered configuration, applied across typed setters and string
     /// pairs in call order. Setting the same security key both through a
     /// typed setter and a string pair on one builder is ambiguous and
     /// rejected when the engine is built; configure each key in one place.
@@ -466,7 +664,7 @@ impl Options {
 
     /// Add many Kafka client options at once, e.g. from a `HashMap` or a
     /// properties file. Same semantics as repeated
-    /// [`kafka_option`](Self::kafka_option) calls (last write wins).
+    /// [`kafka_option`](Self::kafka_option) calls: last write wins.
     pub fn kafka_options<K, V>(mut self, pairs: impl IntoIterator<Item = (K, V)>) -> Self
     where
         K: Into<String>,
@@ -487,15 +685,40 @@ impl Options {
         }
         let mut keys = vec!["security.protocol"];
         keys.extend(self.ssl_entries.iter().map(|(k, _)| k.as_str()));
-        if self.sasl.is_some() {
-            // "sasl.mechanisms" is librdkafka's alias for "sasl.mechanism";
-            // a string pair under either name conflicts with the typed setter.
-            keys.extend([
+        // "sasl.mechanisms" is librdkafka's alias for "sasl.mechanism"; a
+        // string pair under either name conflicts with any typed SASL setter.
+        match &self.sasl {
+            Some(Sasl::UserPass { .. }) => keys.extend([
                 "sasl.mechanism",
                 "sasl.mechanisms",
                 "sasl.username",
                 "sasl.password",
-            ]);
+            ]),
+            Some(Sasl::AwsMskIam { .. }) => keys.extend([
+                "sasl.mechanism",
+                "sasl.mechanisms",
+                "aws.region",
+                "aws.profile",
+                "aws.role.arn",
+                "aws.role.session.name",
+            ]),
+            Some(Sasl::OauthbearerOidc { .. }) => keys.extend([
+                "sasl.mechanism",
+                "sasl.mechanisms",
+                "sasl.oauthbearer.token.endpoint.url",
+                "sasl.oauthbearer.client.id",
+                "sasl.oauthbearer.client.secret",
+                "sasl.oauthbearer.scope",
+                "sasl.oauthbearer.extensions",
+            ]),
+            Some(Sasl::GcpIam { .. }) => keys.extend([
+                "sasl.mechanism",
+                "sasl.mechanisms",
+                "sasl.oauthbearer.method",
+                "gcp.principal",
+                "gcp.credentials.file",
+            ]),
+            None => {}
         }
         keys
     }
@@ -517,10 +740,79 @@ impl AdapterOptions for Options {
             };
             out.push(("security.protocol".to_string(), protocol.to_string()));
             out.extend(self.ssl_entries.iter().cloned());
-            if let Some((mechanism, username, password)) = &self.sasl {
-                out.push(("sasl.mechanism".to_string(), mechanism.as_str().to_string()));
-                out.push(("sasl.username".to_string(), username.clone()));
-                out.push(("sasl.password".to_string(), password.clone()));
+            match &self.sasl {
+                Some(Sasl::UserPass {
+                    mechanism,
+                    username,
+                    password,
+                }) => {
+                    out.push(("sasl.mechanism".to_string(), mechanism.as_str().to_string()));
+                    out.push(("sasl.username".to_string(), username.clone()));
+                    out.push(("sasl.password".to_string(), password.clone()));
+                }
+                Some(Sasl::AwsMskIam {
+                    region,
+                    profile,
+                    role_arn,
+                    role_session_name,
+                }) => {
+                    out.push(("sasl.mechanism".to_string(), "AWS_MSK_IAM".to_string()));
+                    if let Some(region) = region {
+                        out.push(("aws.region".to_string(), region.clone()));
+                    }
+                    if let Some(profile) = profile {
+                        out.push(("aws.profile".to_string(), profile.clone()));
+                    }
+                    if let Some(role_arn) = role_arn {
+                        out.push(("aws.role.arn".to_string(), role_arn.clone()));
+                    }
+                    if let Some(name) = role_session_name {
+                        out.push(("aws.role.session.name".to_string(), name.clone()));
+                    }
+                }
+                Some(Sasl::OauthbearerOidc {
+                    token_endpoint,
+                    client_id,
+                    client_secret,
+                    scope,
+                    extensions,
+                }) => {
+                    out.push(("sasl.mechanism".to_string(), "OAUTHBEARER".to_string()));
+                    out.push((
+                        "sasl.oauthbearer.token.endpoint.url".to_string(),
+                        token_endpoint.clone(),
+                    ));
+                    out.push(("sasl.oauthbearer.client.id".to_string(), client_id.clone()));
+                    out.push((
+                        "sasl.oauthbearer.client.secret".to_string(),
+                        client_secret.clone(),
+                    ));
+                    if let Some(scope) = scope {
+                        out.push(("sasl.oauthbearer.scope".to_string(), scope.clone()));
+                    }
+                    if !extensions.is_empty() {
+                        let joined = extensions
+                            .iter()
+                            .map(|(k, v)| format!("{k}={v}"))
+                            .collect::<Vec<_>>()
+                            .join(",");
+                        out.push(("sasl.oauthbearer.extensions".to_string(), joined));
+                    }
+                }
+                Some(Sasl::GcpIam {
+                    principal,
+                    credentials_file,
+                }) => {
+                    out.push(("sasl.mechanism".to_string(), "OAUTHBEARER".to_string()));
+                    out.push(("sasl.oauthbearer.method".to_string(), "gcp".to_string()));
+                    if let Some(principal) = principal {
+                        out.push(("gcp.principal".to_string(), principal.clone()));
+                    }
+                    if let Some(file) = credentials_file {
+                        out.push(("gcp.credentials.file".to_string(), file.clone()));
+                    }
+                }
+                None => {}
             }
         }
         out
@@ -528,9 +820,9 @@ impl AdapterOptions for Options {
 
     /// Rejects the ambiguous mix: the same security key arriving from both a
     /// typed setter and a string [`kafka_option`](Options::kafka_option) pair
-    /// on this builder. String security pairs WITHOUT typed setters are fine
-    /// (the engine's cross-key validation handles them as one unit), and
-    /// string ssl/sasl keys the typed setters do not emit compose fine.
+    /// on this builder. String security pairs WITHOUT typed setters are fine,
+    /// because the engine's cross-key validation handles them as one unit,
+    /// and string ssl/sasl keys the typed setters do not emit compose fine.
     fn validate(&self) -> Result<(), String> {
         let typed_keys = self.typed_security_keys();
         if typed_keys.is_empty() {
@@ -733,8 +1025,8 @@ mod tests {
     }
 
     /// Every ClientLogLevel variant emits its documented wire name under the
-    /// `llingr.client.log.level` key. A mis-mapped arm would silently change
-    /// client diagnostics verbosity.
+    /// `llingr.client.log.level` key. A mis-mapped variant would silently
+    /// change client diagnostics verbosity.
     #[test]
     fn client_log_level_wire_names() {
         let cases = [
@@ -790,9 +1082,9 @@ mod tests {
         assert_eq!(entry(&entries, "sasl.password"), Some("p"));
     }
 
-    /// Calling a disable_* setter ALONE implies TLS (push_ssl flips the tls
-    /// flag): security.protocol must come out as ssl, not stay absent with a
-    /// dangling ssl.* property on a plaintext connection.
+    /// Calling a disable_* setter ALONE implies TLS, because push_ssl flips
+    /// the tls flag: security.protocol must come out as ssl, not stay absent
+    /// with a dangling ssl.* property on a plaintext connection.
     #[test]
     fn disable_setters_alone_imply_tls() {
         let entries = Options::new().disable_certificate_verification().entries();
@@ -802,9 +1094,8 @@ mod tests {
         assert_eq!(entry(&entries, "security.protocol"), Some("ssl"));
     }
 
-    /// The PEM setters emit the documented inline keys (only their Debug
-    /// redaction was covered before; a key rename would silently drop the
-    /// CA / certificate material).
+    /// The PEM setters emit the documented inline keys: a key rename would
+    /// silently drop the CA / certificate material.
     #[test]
     fn pem_setters_emit_inline_keys() {
         let entries = Options::new()
@@ -816,9 +1107,9 @@ mod tests {
         assert_eq!(entry(&entries, "ssl.key.pem"), Some("KEY"));
     }
 
-    /// Repeated sasl_* calls replace the credentials (Option semantics, last
-    /// write wins): exactly one mechanism/username/password triple is
-    /// emitted, carrying the final values.
+    /// Repeated sasl_* calls replace the credentials, last write wins:
+    /// exactly one mechanism/username/password triple is emitted, with the
+    /// final values.
     #[test]
     fn repeated_sasl_calls_last_write_wins() {
         let entries = Options::new()
@@ -841,7 +1132,7 @@ mod tests {
 
     /// Security entries are appended AFTER the base client entries, in a
     /// fixed order: protocol, then ssl.*, then the sasl triple. The bridge
-    /// consumes them positionally-independently today, but the emitted shape
+    /// consumes them positionally-independently today, but the emitted order
     /// is the crate's contract and silent reordering should not ship.
     #[test]
     fn security_entries_append_after_base_in_fixed_order() {
@@ -859,8 +1150,8 @@ mod tests {
         assert!(position("sasl.username") < position("sasl.password"));
     }
 
-    /// An empty strategy slice currently emits an empty value (rejected at
-    /// engine build time per the doc); pin that it does not panic and does
+    /// An empty strategy slice currently emits an empty value, rejected at
+    /// engine build time per the doc; pin that it does not panic and does
     /// emit the key, so the build-time rejection stays reachable.
     #[test]
     fn empty_assignment_strategy_emits_empty_value() {
@@ -951,9 +1242,9 @@ mod tests {
         assert!(debug.contains("<redacted>"), "{debug}");
     }
 
-    // -- section 4.1 audit additions ------------------------------------------
+    // -- connection, retry, and fetch tuning ----------------------------------
 
-    /// Every audit-added setter emits its documented key with millisecond or
+    /// Every setter here emits its documented key with millisecond or
     /// literal values: a renamed key here would silently miss the bridge's
     /// curated table and fail init, so pin each literal.
     #[test]

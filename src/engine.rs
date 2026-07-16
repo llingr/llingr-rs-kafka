@@ -59,8 +59,9 @@ impl Error for LlingrError {}
 // ---------------------------------------------------------------------------
 
 pub(crate) struct Handlers {
-    // Topic is fixed per consumer (Rust-side config, not a per-message wire
-    // field), so the trampolines read it from here to populate Message.topic.
+    // Topic is fixed per consumer as Rust-side config, not a per-message
+    // wire field, so the trampolines read it from here to populate
+    // Message.topic.
     pub(crate) topic: String,
     pub(crate) process: Box<dyn ProcessHandler>,
     pub(crate) dead_letter: Option<Box<dyn DeadLetterHandler>>,
@@ -69,7 +70,7 @@ pub(crate) struct Handlers {
     pub(crate) log: Option<Box<dyn LogHandler>>,
     pub(crate) bandwidth: Option<Box<dyn BandwidthMetricsHandler>>,
     // The built-in scrape endpoint, when Metrics::serve was configured. Held
-    // here (in the leaked handler set) purely to keep it alive: it runs for
+    // in the leaked handler set purely to keep it alive: it runs for
     // the life of the process like the engine, and a failed build's rollback
     // drops it and stops its server thread. Never read, hence the underscore.
     pub(crate) _prometheus_exporter: Option<ExporterHandle>,
@@ -101,11 +102,11 @@ static INIT_LOCK: Mutex<bool> = Mutex::new(false);
 /// engine logs already reach the `log` facade. If init fails, the pointer is
 /// swapped back to null and the box reclaimed; that is sound because the Go
 /// engine is not running at that point, so no thread can be inside a
-/// trampoline (init-time callbacks happen synchronously on the same thread,
-/// inside the `llingr_init` call that has already returned).
+/// trampoline: init-time callbacks happen synchronously on the same thread,
+/// inside the `llingr_init` call that has already returned.
 ///
 /// Trampolines acquire-load the pointer; the load pairs with the release
-/// store for a clean happens-before edge, and no lock is ever taken on the
+/// store for a clean happens-before edge, and no lock is taken on the
 /// message hot path.
 pub(crate) static HANDLERS: AtomicPtr<Handlers> = AtomicPtr::new(std::ptr::null_mut());
 
@@ -136,17 +137,16 @@ const INIT_ERR_CAP: usize = 1024;
 // Builder
 // ---------------------------------------------------------------------------
 
-/// Staged construction of the [`Llingr`] engine.
+/// Staged construction of the engine ([`Llingr`]).
 ///
-/// Created by [`Builder::new`] with the topic and the two required handlers
-/// (process and dead-letter), mirroring Go's
+/// Created by [`Builder::new`] with the topic and the two required handlers,
+/// process and dead-letter, mirroring Go's
 /// `demux.NewBuilder(topicName, processMessage, writeDeadLetter)`. Chain
-/// [`brokers`](Builder::brokers) and [`consumer_group`](Builder::consumer_group)
-/// (both required: the engine reports a clean error at build time if either
-/// is missing) plus any optional configuration, then call
-/// [`build`](Builder::build) to initialise the Go bridge (which creates the
-/// broker client). Engine logs emitted during startup already flow to the
-/// `log` facade.
+/// [`brokers`](Builder::brokers) and [`consumer_group`](Builder::consumer_group),
+/// both required, plus any optional configuration, then call
+/// [`build`](Builder::build) to initialise the Go bridge and create the
+/// broker client. A missing required field is a clean error at build time.
+/// Engine logs emitted during startup already flow to the `log` facade.
 pub struct Builder {
     topic: String,
     broker: BrokerConfig,
@@ -162,15 +162,15 @@ pub struct Builder {
 
 impl Builder {
     /// Start staged construction with the topic and the two required
-    /// handlers, the exact shape of Go's
-    /// `demux.NewBuilder(topicName, processMessage, writeDeadLetter)`.
+    /// handlers, mirroring Go's
+    /// `demux.NewBuilder(topicName, processMessage, writeDeadLetter)` exactly.
     ///
     /// The dead-letter handler is required: without one, a failed message
     /// would have nowhere to go and would be silently dropped when its
     /// offset commits, breaking the no-dropped-messages invariant. Logging
     /// the message and reason is the bare-minimum implementation; the
-    /// recommended one publishes to a real dead-letter queue (a DLQ topic,
-    /// a table, an object store).
+    /// recommended one publishes to a real dead-letter destination: a DLQ
+    /// topic, a table, or an object store.
     pub fn new(
         topic: &str,
         process: impl ProcessHandler,
@@ -203,20 +203,20 @@ impl Builder {
         self
     }
 
-    /// Kafka client configuration: the typed [`Options`] builder (offset
-    /// reset, timeouts, fetch tuning, TLS/SASL security, and the
-    /// `kafka_option` string escape hatch). Optional; the defaults connect
+    /// Kafka client configuration: the typed [`Options`] builder covering
+    /// offset reset, timeouts, fetch tuning, TLS/SASL security, and the
+    /// `kafka_option` string escape hatch. Optional; the defaults connect
     /// to an unauthenticated cluster.
     ///
-    /// The options are validated client-side; a failure (the same security
-    /// key set both via a typed setter and a string pair) is reported as an
-    /// error when the engine is built.
+    /// The options are validated client-side; a failure, such as the same
+    /// security key set both via a typed setter and a string pair, is
+    /// reported as an error when the engine is built.
     pub fn options(mut self, options: Options) -> Self {
         self.broker = self.broker.adapter_options(options);
         self
     }
 
-    /// Engine tunables (Go's `WithDemuxConfig`). Entirely optional: the
+    /// Engine settings (Go's `WithDemuxConfig`). Entirely optional: the
     /// engine's production defaults are good enough for most situations.
     pub fn demux(mut self, config: DemuxConfig) -> Self {
         self.demux = config;
@@ -258,17 +258,17 @@ impl Builder {
         self
     }
 
-    /// Register an optional shutdown handler. Invoked exactly once, when
-    /// the consumer exits (gracefully or on an emergency shutdown), with
-    /// the reason.
+    /// Register an optional shutdown handler. Invoked exactly once, with
+    /// the reason, when the consumer exits gracefully or on an emergency
+    /// shutdown.
     pub fn shutdown(mut self, handler: impl ShutdownHandler) -> Self {
         self.shutdown = Some(Box::new(handler));
         self
     }
 
     /// Initialise the engine: publish the handler set, register the FFI
-    /// trampolines, and initialise the Go bridge (which creates the broker
-    /// client).
+    /// trampolines, and initialise the Go bridge, which creates the broker
+    /// client.
     ///
     /// # Errors
     ///
@@ -280,8 +280,8 @@ impl Builder {
     pub fn build(mut self) -> Result<Llingr, LlingrError> {
         // Client-side validation failures recorded during configuration
         // (e.g. a security key set both via typed setters and string pairs)
-        // surface here, before any global state is touched, so a corrected
-        // retry starts clean.
+        // are reported here, before any global state is touched, so a
+        // corrected retry starts clean.
         if let Some(message) = self.broker.deferred_error() {
             return Err(LlingrError::new(-5, message.to_string()));
         }
@@ -365,7 +365,7 @@ impl Builder {
         }));
         let previous = HANDLERS.swap(handler_ptr, Ordering::AcqRel);
         if !previous.is_null() {
-            // A previous failed build left nothing behind (it rolls back),
+            // A previous failed build rolls back and leaves nothing behind,
             // and success sets `inited`; a non-null here means the publish
             // protocol was violated. Restore and refuse.
             HANDLERS.swap(previous, Ordering::AcqRel);
@@ -399,7 +399,7 @@ impl Builder {
             )
         };
         if rc != 0 {
-            // Roll back the publication so a retry (after a transient failure)
+            // Roll back the publication so a retry after a transient failure
             // starts clean and `*inited` stays false. Freeing the box here is
             // sound because no goroutine can be inside a trampoline at this
             // point: llingr_init failed, so the engine never reached Subscribe
@@ -426,7 +426,7 @@ impl Builder {
 }
 
 /// The build-time refusal for an engine library whose ABI version does not
-/// match this crate. Extracted so the message (quoted by the docs) is unit
+/// match this crate. Extracted so the message, quoted by the docs, is unit
 /// tested: the branch itself is unreachable against a correctly built
 /// library.
 pub(crate) fn abi_mismatch_error(expected: c_int, reported: c_int) -> LlingrError {
@@ -439,10 +439,11 @@ pub(crate) fn abi_mismatch_error(expected: c_int, reported: c_int) -> LlingrErro
     )
 }
 
-/// The error text for a failed llingr_init: the bridge's own message from the
-/// error buffer when it wrote one (decoded lossily; Go strings carry no UTF-8
-/// guarantee across the boundary), otherwise the stable per-code fallback.
-/// Extracted so every arm is unit tested without a failing engine.
+/// The error text for a failed llingr_init: the bridge's own message from
+/// the error buffer when it wrote one, decoded lossily because Go strings
+/// have no UTF-8 guarantee across the boundary; otherwise the stable
+/// per-code fallback.
+/// Extracted so every branch is unit tested without a failing engine.
 pub(crate) fn init_failure_text(rc: c_int, err_buf: &[c_char], err_len: c_int) -> String {
     if err_len > 0 {
         let bytes: Vec<u8> = err_buf[..err_len as usize]
@@ -462,8 +463,8 @@ pub(crate) fn init_failure_text(rc: c_int, err_buf: &[c_char], err_len: c_int) -
     }
 }
 
-/// Maps llingr_run's return code onto the run() result. Extracted so the
-/// negative arms (unreachable in a healthy lifecycle) are unit tested.
+/// Maps llingr_run's return code onto the run() result. Extracted so that
+/// the negative codes, unreachable in a healthy lifecycle, are unit tested.
 pub(crate) fn run_result(rc: c_int) -> Result<(), LlingrError> {
     match rc {
         0 => Ok(()),
@@ -484,9 +485,9 @@ pub(crate) fn take_snapshot_json() -> Result<String, LlingrError> {
     if ptr.is_null() {
         return Err(LlingrError::new(-1, "engine not initialised"));
     }
-    // The document is json.Marshal output (control characters escaped), so
-    // it is valid UTF-8 with no interior NULs; decode lossily anyway rather
-    // than trusting that across the boundary.
+    // The document is json.Marshal output with control characters escaped,
+    // so it is valid UTF-8 with no interior NULs; decode lossily anyway
+    // rather than trusting that across the boundary.
     let json = unsafe { std::ffi::CStr::from_ptr(ptr) }
         .to_string_lossy()
         .into_owned();
@@ -528,7 +529,7 @@ impl Llingr {
     /// # Errors
     ///
     /// Returns an error if the engine is not initialised, or if the document
-    /// does not parse (which indicates an engine/crate version mismatch).
+    /// does not parse, which indicates an engine/crate version mismatch.
     pub fn snapshot(&self) -> Result<Snapshot, LlingrError> {
         let json = take_snapshot_json()?;
         Snapshot::from_json(&json)
@@ -559,7 +560,7 @@ impl Llingr {
     /// Start consuming messages. Blocks until shutdown or error.
     ///
     /// The engine's poll loop and per-key workers run on Go runtime
-    /// goroutines (not this thread); the workers call back into the
+    /// goroutines, not this thread; the workers call back into the
     /// registered Rust handlers via FFI. This call subscribes, waits for
     /// the initial partition assignment, then parks the calling thread
     /// until the engine shuts down: it returns `Ok(())` only after a
@@ -585,8 +586,8 @@ impl Llingr {
     /// immediately while the first is still draining.
     ///
     /// `stop()` only stops a **running** engine: a call that lands before
-    /// [`run`](Llingr::run) has started consumption is ignored (there is
-    /// nothing to stop, and the later `run()` remains fully stoppable). A
+    /// [`run`](Llingr::run) has started consumption is ignored; there is
+    /// nothing to stop, and the later `run()` remains fully stoppable. A
     /// shutdown signal that can arrive during startup should be re-checked
     /// once `run()` is underway, or simply exit the process.
     ///
@@ -595,8 +596,8 @@ impl Llingr {
     /// `stop` drains the workers, and handlers run ON those workers: calling
     /// it from inside a process/dead-letter handler asks the engine to drain
     /// the very worker that is blocked in the call. The drain stalls until
-    /// the engine gives up on it (the `drain_timeout` tunable, default 20s)
-    /// and that message's completion is discarded as orphaned. To shut down
+    /// the engine gives up on it after the `drain_timeout` setting, 20s by
+    /// default, and that message's completion is discarded as orphaned. To shut down
     /// in response to a message, set a flag or send on a channel from the
     /// handler and call `stop()` from another thread.
     ///
@@ -609,22 +610,10 @@ impl Llingr {
     /// # Signal handler safety
     ///
     /// **Do NOT call this from a signal handler.** Go code is never
-    /// async-signal-safe. Calling any Go exported function from a signal
-    /// handler context will crash the process. Instead, use an atomic flag
-    /// or pipe to communicate from the signal handler to a normal thread
-    /// that calls `stop()`:
-    ///
-    /// ```rust,no_run
-    /// # use std::sync::atomic::{AtomicBool, Ordering};
-    /// static SHUTDOWN: AtomicBool = AtomicBool::new(false);
-    ///
-    /// // In signal handler: just set the flag
-    /// // signal_hook::flag::register(signal_hook::consts::SIGINT, &SHUTDOWN);
-    ///
-    /// // In a separate thread: poll the flag and call stop()
-    /// // while !SHUTDOWN.load(Ordering::Relaxed) { std::thread::sleep(...); }
-    /// // engine.stop();
-    /// ```
+    /// async-signal-safe: calling any Go exported function from a signal
+    /// handler context can deadlock or crash the process. The handler sets an
+    /// atomic flag; a normal thread calls `stop()`. Every program under
+    /// `examples/auth/` contains the working pattern.
     pub fn stop(&self) {
         unsafe { ffi::llingr_stop() }
     }
@@ -635,14 +624,14 @@ impl Llingr {
     /// is made: messages in flight are dropped uncommitted and will be
     /// redelivered after a restart, so downstream consumers must tolerate the
     /// resulting duplicates. The registered shutdown handler receives
-    /// `reason` exactly once (an empty string becomes a default description),
+    /// `reason` exactly once, an empty string becoming a default description,
     /// and a thread parked in [`run`](Llingr::run) returns once the handler
     /// has run and the broker client has been released.
     ///
     /// Safe to call from any thread, in any lifecycle state, repeatedly:
     /// calls after the first effective one are no-ops, and a call that lands
-    /// before [`run`](Llingr::run) still stops the engine (a subsequent
-    /// `run()` then fails to subscribe). Because nothing is drained, the
+    /// before [`run`](Llingr::run) still stops the engine, so a subsequent
+    /// `run()` fails to subscribe. Because nothing is drained, the
     /// [`stop`](Llingr::stop) restriction on calling from inside a
     /// process/dead-letter handler does not apply here: the engine's
     /// emergency path never waits on the worker the handler runs on.
@@ -681,7 +670,7 @@ mod tests {
         }
     }
 
-    /// The exact Display shape is a contract with log/alert tooling that
+    /// The exact Display format is a contract with log/alert tooling that
     /// greps "llingr error <code>: <message>".
     #[test]
     fn llingr_error_display_format_and_code() {
@@ -694,8 +683,8 @@ mod tests {
     }
 
     /// Without an initialised engine the snapshot export returns NULL, which
-    /// must surface as a clean error (this test binary never initialises the
-    /// engine, so the outcome is deterministic).
+    /// must be reported as a clean error. This test binary never initialises
+    /// the engine, so the outcome is deterministic.
     #[test]
     fn take_snapshot_before_init_is_a_clean_error() {
         let err = match take_snapshot_json() {
@@ -717,10 +706,11 @@ mod tests {
         };
     }
 
-    /// A deferred config error (the typed-vs-string security conflict on
-    /// Options) fails build() cleanly BEFORE any global state (handler
-    /// publication, init guard) is touched, so it cannot brick the process
-    /// or interfere with other tests in this binary, and a retry is possible.
+    /// A deferred config error, here the typed-vs-string security conflict
+    /// on Options, fails build() cleanly BEFORE any global state is touched:
+    /// no handler publication, no init guard. It therefore cannot brick the
+    /// process or interfere with other tests in this binary, and a retry is
+    /// possible.
     #[test]
     fn build_surfaces_deferred_config_error() {
         for _ in 0..2 {
@@ -742,8 +732,8 @@ mod tests {
         }
     }
 
-    /// An unbindable scrape endpoint fails build() with a clean error (code
-    /// -6) naming the address, BEFORE handler publication and before the
+    /// An unbindable scrape endpoint fails build() with a clean error, code
+    /// -6, naming the address, BEFORE handler publication and before the
     /// bridge is initialised, and the failure is retryable. This runs
     /// through the real ABI check against the linked engine on the way.
     #[test]

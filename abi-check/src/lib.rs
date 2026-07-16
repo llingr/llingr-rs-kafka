@@ -1,45 +1,30 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 The llingr-rs-kafka Authors
 // SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Llingr-Commercial
 
-//! Compile-time proof that the hand-written FFI declarations in `src/ffi.rs`
-//! match the C contract the Go bridge exports.
+//! Compile-time proof that the FFI declarations in `src/ffi.rs` match the C
+//! contract the Go bridge exports. Building this crate IS the test: every
+//! check below fails compilation on divergence; nothing links or runs. `gen`
+//! is bindgen's view of the `libllingr.h` that cgo emits from the C preamble
+//! in `bridge/main.go`.
 //!
-//! `gen` is bindgen's view of the libllingr.h that cgo emits from the
-//! authoritative C preamble in `bridge/main.go`. Every check below fails
-//! COMPILATION if the two contract copies diverge, so `cargo build` of this
-//! crate is the whole test: no binary is linked and nothing runs.
-//!
-//! Coverage:
-//! - callback typedefs: a swapped argument, wrong width, or wrong order in
-//!   any of the six `*Fn` types breaks the coercion functions;
-//! - passed-by-pointer structs: size, alignment, and every field offset;
-//! - exported functions: signature equality via if/else LUB coercion (two
-//!   `fn` items only unify when their signatures are identical).
-//!
-//! The `llingr_on_*` registration functions are deliberately absent from the
-//! export checks: bindgen declares their parameter as `Option<fn>` (C
-//! function pointers are nullable) while the hand-written declarations take
-//! the bare fn type (registration with NULL is meaningless). `Option<extern
-//! "C" fn>` is guaranteed ABI-compatible with a nullable C function pointer
-//! (the niche optimisation), and the payload type itself is pinned by the
-//! coercion checks, so the intentional strictness costs no coverage.
+//! The `llingr_on_*` registration functions are absent from the export
+//! checks: bindgen wraps C function pointers in `Option` (nullable), the
+//! ffi.rs declarations take the bare fn type. `Option<extern "C" fn>`
+//! is ABI-compatible with a nullable C function pointer, and the payload
+//! type is pinned by the coercion checks, so no coverage is lost.
 
 #![allow(dead_code)]
-// Both contract copies live in this one crate (the donor layout had the
-// hand-written copy in a separate -sys crate), so rustc's
-// clashing_extern_declarations lint sees the same symbols declared twice and
-// flags exactly the two DOCUMENTED divergences: cgo headers drop `const`
-// (llingr_init, llingr_emergency_stop) and bindgen wraps C function pointers
-// in Option (llingr_on_*). Those divergences are deliberate and separately
-// pinned (the const-normalising shim below, the niche-optimisation note
-// above), so the lint is noise here.
+// Both contract copies are declared in this one crate, so
+// clashing_extern_declarations flags the two deliberate divergences:
+// cgo headers drop `const` (normalised by the shim below) and bindgen
+// wraps C function pointers in Option (the module note above).
+// Both are pinned, so the lint is noise here.
 #![allow(clashing_extern_declarations)]
 
 use std::os::raw::{c_char, c_int};
 
-// The hand-written contract copy under test, included by path: this dev-only
-// crate deliberately does not depend on the llingr-kafka crate (that would
-// build the Go engine just to read declarations).
+// The contract copy under test. Depending on the llingr-kafka crate instead
+// would build the Go engine just to read declarations.
 #[path = "../../src/ffi.rs"]
 mod ffi;
 
@@ -54,8 +39,8 @@ mod gen_types {
     include!(concat!(env!("OUT_DIR"), "/gen_types.rs"));
 }
 
-// Pass B: typedefs and exports, struct names aliased to the hand-written
-// types so signatures can unify (see build.rs).
+// Pass B: typedefs and exports, struct names aliased to the ffi.rs types so
+// signatures can unify (see build.rs).
 mod gen {
     #![allow(
         non_camel_case_types,
@@ -68,7 +53,7 @@ mod gen {
 }
 
 // ---------------------------------------------------------------------------
-// Callback typedefs: hand-written type must coerce into bindgen's.
+// Callback typedefs: the ffi.rs type must coerce into bindgen's.
 // ---------------------------------------------------------------------------
 
 fn process_fn_matches(f: ffi::ProcessFn) -> gen::llingr_process_fn {
@@ -174,12 +159,11 @@ assert_same_signature!(
     gen::llingr_free_string
 );
 
-// llingr_init needs const normalisation: cgo-generated headers drop `const`
-// (Go has no const pointers), so the header says `char*` where the
-// hand-written declaration correctly says `*const c_char`. Constness does
-// not exist at the C ABI level. The shim compiles against the hand-written
-// declaration (any drift in its arg count, order, or widths breaks the
-// body), and the LUB check compares the normalised shape against bindgen's.
+// cgo headers drop `const` (Go has no const pointers): the header says
+// `char*` where ffi.rs says `*const c_char`, and constness does not exist at
+// the C ABI level. The shim compiles against the ffi.rs declaration
+// (drift in its arg count, order, or widths breaks the body); the LUB check
+// compares the normalised signature against bindgen's.
 unsafe extern "C" fn init_const_normalised(
     config_json: *mut c_char,
     config_len: c_int,
@@ -190,3 +174,14 @@ unsafe extern "C" fn init_const_normalised(
     unsafe { ffi::llingr_init(config_json, config_len, err_buf, err_cap, err_len_out) }
 }
 assert_same_signature!(check_init, init_const_normalised, gen::llingr_init);
+
+// llingr_emergency_stop has the same dropped-const divergence; same
+// normalisation.
+unsafe extern "C" fn emergency_stop_const_normalised(reason: *mut c_char, reason_len: c_int) {
+    unsafe { ffi::llingr_emergency_stop(reason, reason_len) }
+}
+assert_same_signature!(
+    check_emergency_stop,
+    emergency_stop_const_normalised,
+    gen::llingr_emergency_stop
+);

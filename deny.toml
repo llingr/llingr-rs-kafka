@@ -18,7 +18,7 @@ version = 2
 # Allow-list for the whole Rust crate graph: the permissive licences of the
 # Rust dependencies (log, serde, prometheus-client, tiny_http, signal-hook and
 # their transitive deps), plus this crate's own dual expression. The crate
-# manifest carries the plain "AGPL-3.0-only" identifier (crates.io/cargo reject
+# manifest declares the plain "AGPL-3.0-only" identifier (crates.io/cargo reject
 # LicenseRef- in the license field); the commercial option travels in LICENSE
 # and REUSE.toml, so LicenseRef-Llingr-Commercial is allowed here too.
 allow = [

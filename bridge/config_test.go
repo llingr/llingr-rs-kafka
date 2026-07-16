@@ -11,9 +11,9 @@ import (
 	"github.com/llingr/llingr-demux/demux/config"
 )
 
-// A full config with every one of the thirteen demux tunables set (durations
-// as strings, counts as numbers), for the "still parses" case and as the base
-// the rejection cases mutate.
+// A full config with every one of the thirteen demux settings set, durations
+// as strings and counts as numbers, for the "still parses" case and as the
+// base the rejection cases mutate.
 const fullValidConfigJSON = `{
 	"brokers": "localhost:9092",
 	"topic": "orders",
@@ -92,7 +92,7 @@ func TestParseBridgeConfigAcceptsFullDemux(t *testing.T) {
 
 // The reflection-derived key set must have exactly the fields
 // config.DemuxConfig declares. Pinning the count to thirteen means an engine
-// upgrade that adds a tunable trips this test, forcing a deliberate review of
+// upgrade that adds a setting trips this test, forcing a deliberate review of
 // the bridge's handling rather than a silent gap.
 func TestDemuxJSONTagsMatchStruct(t *testing.T) {
 	tags := demuxJSONTags()
@@ -100,10 +100,10 @@ func TestDemuxJSONTagsMatchStruct(t *testing.T) {
 	if len(tags) != want {
 		t.Fatalf("demuxJSONTags returned %d keys, want %d: %v", len(tags), want, tags)
 	}
-	// Every declared field carries a json tag that lands in the set, so the
+	// Every declared field has a json tag that lands in the set, so the
 	// count above is not masking a "-" or untagged field.
 	structFields := reflect.TypeOf(config.DemuxConfig{}).NumField()
 	if structFields != want {
-		t.Fatalf("config.DemuxConfig declares %d fields, want %d; the engine changed its tunable set", structFields, want)
+		t.Fatalf("config.DemuxConfig declares %d fields, want %d; the engine changed its setting set", structFields, want)
 	}
 }

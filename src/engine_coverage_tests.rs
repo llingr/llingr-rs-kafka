@@ -1,12 +1,10 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 The llingr-rs-kafka Authors
 // SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Llingr-Commercial
 
-//! Coverage for the engine's error-code mappings (gap report Tier 1): the
-//! negative arms are unreachable against a healthy engine, so they are
-//! exercised through the extracted pure helpers. Every message asserted here
-//! is quoted by the docs; a wording change must be deliberate.
-//!
-//! New coverage in a new file; the landed engine tests stay byte-unmodified.
+//! Coverage for the engine's error-code mappings: the negative codes are
+//! unreachable against a healthy engine, so they are exercised through the
+//! extracted pure helpers. Every message asserted here is quoted by the
+//! docs; a wording change must be deliberate.
 
 use std::os::raw::c_char;
 
@@ -21,7 +19,7 @@ fn run_result_maps_every_code_to_its_documented_text() {
         (-2, "subscribe failed"),
         (-3, "engine panicked (recovered at FFI boundary)"),
         (-99, "unknown runtime error"),
-        (7, "unknown runtime error"), // positive garbage is also the default arm
+        (7, "unknown runtime error"), // positive garbage also maps to the default text
     ];
     for (rc, want) in cases {
         let err = run_result(rc).expect_err("non-zero rc is an error");
@@ -42,8 +40,8 @@ fn abi_mismatch_error_text_is_the_documented_shape() {
 }
 
 /// With no bridge-written text, each init return code maps to its stable
-/// fallback (the codes are the bridge's contract: errAlreadyInit through
-/// errBadOption).
+/// fallback; the codes are the bridge's contract, errAlreadyInit through
+/// errBadOption.
 #[test]
 fn init_failure_fallback_text_per_code() {
     let empty: [c_char; 4] = [0; 4];
@@ -85,7 +83,7 @@ fn init_failure_bridge_text_wins_and_is_length_bounded() {
     );
 }
 
-/// Go error strings carry no UTF-8 guarantee across the boundary: invalid
+/// Go error strings have no UTF-8 guarantee across the boundary: invalid
 /// bytes decode lossily to the replacement character, never a panic.
 #[test]
 fn init_failure_text_decodes_invalid_utf8_lossily() {

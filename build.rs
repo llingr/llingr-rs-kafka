@@ -87,18 +87,18 @@ fn main() {
 
     // 3. Build the engine from bridge/ with the Go toolchain.
 
-    // The musl seam (PLAN.md section 7). A statically linked c-archive needs
-    // only the golang/go#13492 fix, so this match arm is the shortest path to
-    // musl once upstream lands it; until then, fail honestly. This message is
-    // seam 1 of 3: keep its substance aligned with the Makefile's LIBC guard
-    // and docker/Dockerfile.builder, which carry the same canonical text.
+    // The musl seam. A statically linked c-archive needs only the
+    // golang/go#13492 fix, so this branch is the shortest path to musl once
+    // upstream lands it; until then, fail honestly. This message is one of
+    // three seams: keep its substance aligned with the Makefile's LIBC guard
+    // and docker/Dockerfile, which contain the same canonical text.
     if std::env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("musl") {
         panic!(
             "musl target {} is unsupported: the Go engine c-archive crashes in runtime init \
              on musl (Go assumes glibc's argc/argv/envp .init_array convention; \
              golang/go#13492, fix PR 69325 unmerged), and a dlopen route hits Go's \
              Initial-Exec TLS which musl refuses for dlopen'd libraries (golang/go#48596). \
-             Build against glibc (a *-gnu target; the Makefile and Dockerfile.builder \
+             Build against glibc (a *-gnu target; the Makefile and docker/Dockerfile \
              default to LIBC=glibc). See docs/internal/MUSL.md",
             std::env::var("TARGET").unwrap_or_default()
         );
@@ -226,7 +226,7 @@ fn require_go_1_25() {
          remedies: (1) install Go 1.25+ from https://go.dev/dl/, (2) build the engine once \
          with `make engine` (uses Docker) and set LLINGR_LIB_DIR=dist/<target-triple>, or \
          (3) build the whole application inside the provided builder image \
-         (docker/Dockerfile.builder).";
+         (docker/Dockerfile).";
 
     let out = Command::new("go")
         .arg("version")

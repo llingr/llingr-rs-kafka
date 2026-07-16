@@ -2,9 +2,9 @@
 
 You configure the Kafka client through the typed `Options` builder, which is the
 single home for all client configuration: connection and consumer-group tuning,
-fetch sizing, retries and timeouts, and (covered in `docs/security.md`) TLS and
-SASL. Anything the typed setters do not cover is reachable on the same builder as
-librdkafka-style string key/value pairs. The design principle throughout is that
+fetch sizing, retries and timeouts, and the TLS and SASL security options
+covered in `docs/security.md`. Anything the typed setters do not cover is
+reachable on the same builder as librdkafka-style string key/value pairs. The design principle throughout is that
 nothing is silently ignored: an unknown key fails at `build()` with the full list
 of supported keys, and options that would corrupt the engine's guarantees are
 deliberately excluded and named here with their reasons, rather than quietly
@@ -39,14 +39,23 @@ ports across.
 | `disable_fetch_crc_validation()` | `check.crcs=false` | `kgo.DisableFetchCRCValidation` (validation is on by default) |
 | `disable_client_metrics_push()` | `enable.metrics.push=false` | `kgo.DisableClientMetrics` (KIP-714; on by default where the broker supports it) |
 
-The security setters (`tls*`, `sasl_*`, and the verification toggles) live on the
-same builder and are documented in full, with one worked example per mechanism,
-in `docs/security.md`.
+The security setters live on the same builder and are documented in full, with
+one worked example per mechanism, in `docs/security.md`. That set covers TLS and
+mTLS via `tls*` and the verification toggles; SASL PLAIN and SCRAM via
+`sasl_plain`, `sasl_scram_sha256`, and `sasl_scram_sha512`; AWS_MSK_IAM via
+`sasl_aws_msk_iam` plus `aws_region`, `aws_profile`, and `aws_assume_role`,
+emitting the `aws.*` keys; OAUTHBEARER OIDC via `sasl_oauthbearer_oidc` plus
+`oauthbearer_scope` and `oauthbearer_extensions`, emitting the
+`sasl.oauthbearer.*` keys; and GCP IAM for Google Cloud Managed Service for
+Apache Kafka via `sasl_gcp_iam` plus `gcp_principal` and `gcp_credentials_file`,
+emitting `sasl.oauthbearer.method=gcp` and the `gcp.*` keys. All of these can
+also be given as string pairs, and the whole security set is cross-validated as
+one unit at `build()`.
 
 **`rebalance_timeout` is validated against the engine.** The engine drains
 in-flight work during a rebalance before acknowledging the revoke, so
-`rebalance.timeout.ms` must exceed the `drain_timeout` engine knob (default 20
-seconds), or `build()` fails; the defaults satisfy it. The error is in
+`rebalance.timeout.ms` must exceed the `drain_timeout` engine setting (default
+20 seconds), or `build()` fails; the defaults satisfy it. The error is in
 `docs/troubleshooting.md`, and the drain relationship in `docs/configuration.md`.
 
 ## The llingr namespace: engine and adapter options
@@ -68,8 +77,8 @@ builder:
 | `poll_error_backoff(Duration)` | `llingr.poll.error.backoff.ms` | How long the adapter waits between failed poll attempts. `0` disables the backoff; otherwise at most 5 seconds. Default 25 milliseconds |
 
 The poll-error trio governs the sustained-poll-error bail described in
-`docs/operations.md`: `poll_error_bail_after` is the ten-minute window (now
-tunable), and the shutdown it triggers carries the reason catalogued in
+`docs/operations.md`: `poll_error_bail_after` configures the ten-minute window,
+and the shutdown it triggers carries the reason catalogued in
 `docs/troubleshooting.md`.
 
 ## The string escape hatch
@@ -90,35 +99,35 @@ let opts = Options::new()
 
 Three behaviours to know:
 
-- **Last write wins.** Repeating a key (across typed setters and string pairs, in
-  call order) is deterministic: the last value set is the one used. This is the
+- **Last write wins.** Repeating a key across typed setters and string pairs, in
+  call order, is deterministic: the last value set is the one used. This is the
   layered-config idiom, so a base configuration followed by overrides behaves as
   you expect.
 - **A security key set two ways is rejected.** Setting the same security key
   through both a typed setter and a string pair on one builder is ambiguous and
-  fails at `build()` (the exact message is in `docs/troubleshooting.md`).
+  fails at `build()`; the exact message is in `docs/troubleshooting.md`.
   Configure each key in one place.
 - **`bootstrap.servers` and `group.id` are reserved.** They are set with the
   builder's `.brokers(...)` and `.consumer_group(...)`, so passing them as string
   pairs is an init error.
 
-`isolation.level` is a string-only key (there is no typed setter): `read_committed`
+`isolation.level` is a string-only key with no typed setter: `read_committed`
 is accepted and is the safe default, and `read_uncommitted` is rejected outright
 (see the exclusions below).
 
 One nuance worth stating: a boolean key that merely restates a default is accepted
 and sets nothing. `check.crcs=true`, `allow.auto.create.topics=false`, and
-`enable.metrics.push=true` are all valid configuration that changes no behaviour
-(the typed setters `disable_fetch_crc_validation()`, `allow_auto_topic_creation()`,
-and `disable_client_metrics_push()` are how you change these from their defaults).
+`enable.metrics.push=true` are all valid configuration that changes no behaviour;
+the typed setters `disable_fetch_crc_validation()`, `allow_auto_topic_creation()`,
+and `disable_client_metrics_push()` are how you change these from their defaults.
 
 ## Unknown keys fail loudly
 
 Every key that is neither a supported option nor a recognised security key fails
 initialisation with the complete supported-key list, never a silent no-op. For
-example, `kafka_option("no.such.key", ...)` fails with the 41-key list:
+example, `kafka_option("no.such.key", ...)` fails with the 53-key list:
 
-`option "no.such.key" is not supported (supported: allow.auto.create.topics, auto.offset.reset, check.crcs, client.id, client.rack, connections.max.idle.ms, enable.metrics.push, enable.ssl.certificate.verification, fetch.max.bytes, fetch.max.wait.ms, fetch.min.bytes, fetch.wait.max.ms, group.instance.id, heartbeat.interval.ms, isolation.level, llingr.client.log.level, llingr.max.concurrent.fetches, llingr.poll.error.backoff.ms, llingr.poll.error.bail.after.ms, llingr.poll.error.log.interval.ms, llingr.request.retries, llingr.retry.timeout.ms, max.partition.fetch.bytes, metadata.max.age.ms, partition.assignment.strategy, rebalance.timeout.ms, sasl.mechanism, sasl.mechanisms, sasl.password, sasl.username, security.protocol, session.timeout.ms, socket.connection.setup.timeout.ms, ssl.ca.location, ssl.ca.pem, ssl.certificate.location, ssl.certificate.pem, ssl.endpoint.identification.algorithm, ssl.key.location, ssl.key.password, ssl.key.pem)`
+`option "no.such.key" is not supported (supported: allow.auto.create.topics, auto.offset.reset, aws.profile, aws.region, aws.role.arn, aws.role.session.name, check.crcs, client.id, client.rack, connections.max.idle.ms, enable.metrics.push, enable.ssl.certificate.verification, fetch.max.bytes, fetch.max.wait.ms, fetch.min.bytes, fetch.wait.max.ms, gcp.credentials.file, gcp.principal, group.instance.id, heartbeat.interval.ms, isolation.level, llingr.client.log.level, llingr.max.concurrent.fetches, llingr.poll.error.backoff.ms, llingr.poll.error.bail.after.ms, llingr.poll.error.log.interval.ms, llingr.request.retries, llingr.retry.timeout.ms, max.partition.fetch.bytes, metadata.max.age.ms, partition.assignment.strategy, rebalance.timeout.ms, sasl.mechanism, sasl.mechanisms, sasl.oauthbearer.client.id, sasl.oauthbearer.client.secret, sasl.oauthbearer.extensions, sasl.oauthbearer.method, sasl.oauthbearer.scope, sasl.oauthbearer.token.endpoint.url, sasl.password, sasl.username, security.protocol, session.timeout.ms, socket.connection.setup.timeout.ms, ssl.ca.location, ssl.ca.pem, ssl.certificate.location, ssl.certificate.pem, ssl.endpoint.identification.algorithm, ssl.key.location, ssl.key.password, ssl.key.pem)`
 
 ## What is deliberately excluded, and why
 
@@ -132,7 +141,7 @@ guarantees are excluded rather than offered as footguns.
 
 | Excluded option(s) | Reason |
 |---|---|
-| The auto-commit family (`DisableAutoCommit`, `GreedyAutoCommit`, `AutoCommitInterval`, `AutoCommitMarks`, `AutoCommitCallback`) | The adapter forces `DisableAutoCommit`: the engine's gap-buffer committer owns offset commits. The `DemuxConfig` `auto_commit_interval` knob is the cadence control |
+| The auto-commit family (`DisableAutoCommit`, `GreedyAutoCommit`, `AutoCommitInterval`, `AutoCommitMarks`, `AutoCommitCallback`) | The adapter forces `DisableAutoCommit`: the engine's gap-buffer committer owns offset commits. The `DemuxConfig` `auto_commit_interval` setting is the cadence control |
 | The rebalance callbacks (`OnPartitionsAssigned`/`Revoked`/`Lost`, `BlockRebalanceOnPoll`, `AdjustFetchOffsetsFn`, `OnOffsetsFetched`) | The adapter installs its own rebalance callbacks to run the engine's drain-before-revoke coordination |
 | Topic selection (`ConsumeTopics`, `ConsumePartitions`, `ConsumeRegex`, `ConsumeExcludeTopics`) | One topic per consumer is the `Builder` contract; the adapter sets the topic |
 | `ConsumeStartOffset` | Explicit start offsets bypass committed group offsets; `auto.offset.reset` is the supported reset policy |
@@ -149,7 +158,7 @@ guarantees are excluded rather than offered as footguns.
 | `GroupProtocol` | The KIP-848 next-generation rebalance protocol is not yet validated against the engine's drain coordination, so it is deferred deliberately |
 | `RequireStableFetchOffsets` | KIP-447 interacts with the engine's commit timing and is deferred pending its own validation |
 
-**Not part of a consumer:** the entire producer surface (`DefaultProduceTopic`
+**Not part of a consumer:** every producer option (`DefaultProduceTopic`
 through `TransactionTimeout`, including acks, compression, idempotence, lingering,
 and transactions) does not exist, because this crate is a consumer.
 
@@ -157,16 +166,16 @@ and transactions) does not exist, because this crate is a consumer.
 (`Dialer`, `RetryBackoffFn`, `RetryTimeoutFn`, `WithHooks`, `WithPools`,
 `WithContext`, `OnRebootstrapRequired`, `ConsumePreferringLagFn`,
 `WithDecompressor`, `WithCompressor`, `UserMetricsFn`) are code, not config, so a
-string or typed setter cannot carry them.
+string or typed setter cannot express them.
 
 **Expert or niche, with no reasonable operator expectation:** a handful of
 low-level tweaks (`RequestTimeoutOverhead`, `BrokerMaxWriteBytes`/`ReadBytes`,
 `MetadataMinAge`, `MaxVersions`/`MinVersions`, `SoftwareNameAndVersion`,
 `ConcurrentTransactionsBackoff`, `ConsiderMissingTopicDeletedAfter`,
 `AlwaysRetryEOF`, `DisableFetchSessions`, `RecheckPreferredReplicaInterval`) are
-excluded because the operator-facing surface for what they touch is elsewhere
-(for example fetch sizing is the `fetch.max.bytes` family, and follower-fetch
-tuning is `rack()`).
+excluded because the operator-facing control for what they touch is elsewhere:
+fetch sizing is the `fetch.max.bytes` family, and follower-fetch tuning is
+`rack()`.
 
 ## A worked example
 
@@ -188,7 +197,7 @@ let opts = Options::new()
 # }
 ```
 
-The security surface (TLS, mTLS, SASL PLAIN/SCRAM, and the scheduled AWS_MSK_IAM
-and OAUTHBEARER mechanisms) is in `docs/security.md`; the engine tuning knobs
-(worker concurrency, timeouts, and the `drain_timeout` that `rebalance_timeout`
-is checked against) are in `docs/configuration.md`.
+The security options for TLS, mTLS, SASL PLAIN/SCRAM, AWS_MSK_IAM, OAUTHBEARER,
+and GCP IAM are in `docs/security.md`; the engine tuning settings for worker
+concurrency and timeouts, including the `drain_timeout` that `rebalance_timeout`
+is checked against, are in `docs/configuration.md`.

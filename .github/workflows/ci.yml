@@ -25,6 +25,11 @@ jobs:
         with:
           toolchain: stable
       - run: cargo build --all-targets --locked
+      # The crate-root examples/ (auth configuration walkthroughs, shipped in the
+      # published crate) are an explicit gate: a broken example fails CI. Note
+      # --all-targets above already builds them; this names the intent so the
+      # examples stay checked even if the build line changes.
+      - run: cargo check --examples --locked
       # Rustdoc warnings fail here rather than on docs.rs after publish
       # (missing docs are already a compile error via #![deny(missing_docs)]).
       - run: RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --locked

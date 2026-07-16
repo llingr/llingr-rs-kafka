@@ -1,0 +1,22 @@
+# syntax=docker/dockerfile:1
+# SPDX-FileCopyrightText: Copyright (c) 2026 The llingr-rs-kafka Authors
+# SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Llingr-Commercial
+#
+# The example producer as a fully static binary on `scratch`: nothing in the
+# image but the binary. A plain franz-go producer built with CGO_ENABLED=0,
+# so no C toolchain enters the image.
+#
+# The build context is the example directory; only producer/, its own Go
+# module, is copied.
+
+FROM golang:1.25-bookworm AS build
+WORKDIR /build
+COPY producer/ ./producer/
+WORKDIR /build/producer
+# CGO_ENABLED=0 with netgo produces a fully static binary that runs on
+# scratch and resolves the broker hostname with Go's pure-Go resolver.
+RUN CGO_ENABLED=0 go build -tags netgo -ldflags "-s -w" -o /producer .
+
+FROM scratch AS runtime
+COPY --from=build /producer /producer
+ENTRYPOINT ["/producer"]

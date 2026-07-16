@@ -1,10 +1,9 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 The llingr-rs-kafka Authors
 // SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Llingr-Commercial
 
-// Coverage closes for the gap report (Tier 1/2): config validation rejection
-// branches, the C-typed marshalling seams (via coverage_testsupport.go), the
-// dead-letter rc-to-error mapping, and the emergency/shutdown residual arms.
-// New coverage in a new file; the landed donor tests stay byte-unmodified.
+// Coverage for the config validation rejection branches, the C-typed
+// marshalling seams in coverage_testsupport.go, the dead-letter rc-to-error
+// mapping, and the remaining emergency and shutdown paths.
 
 package main
 
@@ -21,7 +20,7 @@ import (
 	"github.com/llingr/llingr-nexus/nexus"
 )
 
-// tlsState builds a connection state carrying the given PEM certificate as
+// tlsState builds a connection state with the given PEM certificate as
 // the peer chain (empty PEM = no peer certificates).
 func tlsState(t *testing.T, certPEM string) tls.ConnectionState {
 	t.Helper()
@@ -40,7 +39,7 @@ func tlsState(t *testing.T, certPEM string) tls.ConnectionState {
 }
 
 // ---------------------------------------------------------------------------
-// Config validation rejection branches (Tier 1 item 3)
+// Config validation rejection branches
 // ---------------------------------------------------------------------------
 
 func TestParseBridgeConfigMissingRequiredFields(t *testing.T) {
@@ -80,13 +79,13 @@ func TestValidateDemuxKeysRejectionBranches(t *testing.T) {
 		t.Fatalf("non-object demux: want errInvalidJSON, got %v", berr)
 	}
 
-	// Unparseable document (unreachable through parseBridgeConfig, which
-	// strict-decodes first; the defensive branch still must not lie).
+	// Unparseable document: unreachable through parseBridgeConfig, which
+	// strict-decodes first, but the defensive branch still must not lie.
 	if berr := validateDemuxKeys([]byte(`{nope`)); berr == nil {
 		t.Fatal("malformed document must error")
 	}
 
-	// No demux object at all: nothing to validate.
+	// No demux object: nothing to validate.
 	if berr := validateDemuxKeys([]byte(`{"topic":"t"}`)); berr != nil {
 		t.Fatalf("absent demux must pass, got %v", berr)
 	}
@@ -103,7 +102,7 @@ func TestParseBandwidthUnparseableFlushInterval(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Option helper rejection branches (Tier 1 item 5)
+// Option helper rejection branches
 // ---------------------------------------------------------------------------
 
 func TestPopClientLogLevelAllArms(t *testing.T) {
@@ -198,8 +197,8 @@ func TestTLSConfigRejectionBranches(t *testing.T) {
 		})
 	}
 
-	// Valid mTLS material still assembles (pins the happy arm the rejection
-	// cases surround).
+	// Valid mTLS material still assembles: the happy path the rejection
+	// cases surround.
 	_, berr := collectSecurity(t, map[string]string{
 		"security.protocol":   "ssl",
 		"ssl.ca.pem":          caPEM,
@@ -253,7 +252,7 @@ func TestSaslScramSha512Mechanism(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// C-typed marshalling seams (Tier 1 items 1 and 4)
+// C-typed marshalling seams
 // ---------------------------------------------------------------------------
 
 func TestWriteInitErrThroughCBuffer(t *testing.T) {
@@ -290,7 +289,7 @@ func TestMarshalValueNullEmptyAndBytes(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// llingr_init negative paths (Tier 1 item 1, through real C buffers)
+// llingr_init negative paths, through real C buffers
 // ---------------------------------------------------------------------------
 
 func TestInitRejectsInvalidConfigurations(t *testing.T) {
@@ -331,7 +330,7 @@ func TestInitRejectsInvalidConfigurations(t *testing.T) {
 // An unreachable broker fails init with errAdapter and the adapter's own
 // message (the adapter dials during CreateConsumer; 127.0.0.1:1 refuses
 // immediately, so this is fast and deterministic). NOTE this also documents
-// why llingr_init's panic-recovery arm stays uncovered: the engine validates
+// why llingr_init's panic-recovery branch stays uncovered: the engine validates
 // DemuxConfig inside Build, which the adapter only reaches after a
 // successful broker dial, so the recover path needs a live broker.
 func TestInitSurfacesBrokerConnectFailure(t *testing.T) {
@@ -341,7 +340,7 @@ func TestInitSurfacesBrokerConnectFailure(t *testing.T) {
 		t.Fatalf("rc = %d, want errAdapter (%d): %s", rc, errAdapter, text)
 	}
 	if !strings.Contains(text, "franz adapter:") {
-		t.Fatalf("adapter failure must carry the adapter's message: %q", text)
+		t.Fatalf("adapter failure must contain the adapter's message: %q", text)
 	}
 }
 
@@ -359,7 +358,7 @@ func TestInitRejectsSecondInstance(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// run/stop negative arms (Tier 1 item 1)
+// run/stop error paths
 // ---------------------------------------------------------------------------
 
 func TestRunAndStopBeforeInit(t *testing.T) {
@@ -375,7 +374,7 @@ func TestRunAndStopBeforeInit(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Dead-letter rc-to-error mapping: the escalation seam (Tier 2 item 6)
+// Dead-letter rc-to-error mapping: the escalation seam
 // ---------------------------------------------------------------------------
 
 func deadLetterUnderTest() nexus.WriteDeadLetter[[]byte] {
@@ -406,9 +405,10 @@ func TestWriteDeadLetterSuccessCarriesReason(t *testing.T) {
 }
 
 // A non-zero dead-letter return code maps to the exact error the engine's
-// circuit breaker consumes: this is the seam between the Rust panic
-// containment (panic -> rc 1, proven by the Rust boundary tests) and the
-// engine's failure-to-breaker escalation (proven in the demux suite).
+// circuit breaker consumes: the seam between the Rust panic containment and
+// the engine's failure-to-breaker escalation. The containment, panic to
+// rc 1, is proven by the Rust boundary tests; the escalation is proven in
+// the demux suite.
 func TestWriteDeadLetterFailureCodeBecomesError(t *testing.T) {
 	restore := installTestDeadletterCallback(1)
 	defer restore()
@@ -449,12 +449,11 @@ func TestWriteDeadLetterNilReason(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Shutdown callback marshalling and emergency residuals (Tier 2 item 6)
+// Shutdown callback marshalling and emergency residuals
 // ---------------------------------------------------------------------------
 
 // The registered shutdown callback receives "graceful shutdown" for a nil
-// reason and the reason's text otherwise (the marshalling arms the
-// state-focused donor tests leave unhit).
+// reason and the reason's text otherwise: both marshalling branches.
 func TestShutdownCallbackMarshalsReason(t *testing.T) {
 	fake := &lifecycleConsumer{}
 	resetBridgeForStop(t, fake)
@@ -474,7 +473,7 @@ func TestShutdownCallbackMarshalsReason(t *testing.T) {
 	}
 }
 
-// panickingEmergencyConsumer trips the emergencyStop recover arm.
+// panickingEmergencyConsumer trips the emergencyStop recover branch.
 type panickingEmergencyConsumer struct{}
 
 func (panickingEmergencyConsumer) Subscribe() error                { return nil }

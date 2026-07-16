@@ -1,0 +1,11 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 The llingr-rs-kafka Authors
+# SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Llingr-Commercial
+#
+# The end-to-end example's Rust workspace. The only Rust binary is the consumer,
+# which depends on the llingr-kafka crate by path (../..). The producer is a
+# separate Go module (example/producer, a plain franz-go client), not a cargo
+# member.
+
+[workspace]
+resolver = "2"
+members = ["consumer"]

@@ -11,9 +11,9 @@ third-party-notices obligation and the musl status you plan around.
 ## The ordinary build
 
 Most of the time you build with plain `cargo build`. The crate's build script
-compiles the engine from source the first time (fetching the pinned Go modules
-from the module proxy, verified against `go.sum`) into a static archive, and
-links it into your binary. After that first build the archive is cached like any
+compiles the engine from source the first time into a static archive, fetching
+the pinned Go modules from the module proxy and verifying them against `go.sum`,
+and links it into your binary. After that first build the archive is cached like any
 build artefact, so subsequent builds are ordinary-speed.
 
 That first build needs a toolchain:
@@ -26,13 +26,13 @@ That first build needs a toolchain:
 Supported platforms are Linux with glibc for production and macOS for
 development. Documentation builds are the exception to the Go requirement: under
 `DOCS_RS` the build script emits nothing, so `DOCS_RS=1 cargo doc --no-deps`
-succeeds with no Go toolchain present (this is how docs.rs builds the crate).
+succeeds with no Go toolchain present, which is how docs.rs builds the crate.
 
 ## Platforms
 
 Find your operating system and chip; the build lines up three things for it, the
 Rust target triple, the Go `GOOS`/`GOARCH`, and the C compiler cgo uses, and they
-must all agree (a mismatch is the commonest cause of a broken link). On a machine
+must all agree; a mismatch is the commonest cause of a broken link. On a machine
 building for its own architecture, they agree automatically.
 
 | Platform | Rust target triple | GOOS / GOARCH | C compiler |
@@ -45,14 +45,15 @@ building for its own architecture, they agree automatically.
 
 **Building natively on the target chip is the simplest path, so use it where you
 can.** On Linux, `sudo apt-get install -y build-essential`, Go 1.25+ from the
-official tarball (distro Go is often too old), and Rust from rustup. On macOS,
-`xcode-select --install` gives you the C compiler, linker, and SDK; you do not
-need the full Xcode app.
+official tarball since distro Go is often too old, and Rust from rustup. On
+macOS, `xcode-select --install` gives you the C compiler, linker, and SDK; you
+do not need the full Xcode app.
 
-**macOS has two honest limits.** There is no fully-static macOS binary (Mach-O
-has no static libc), so the drop-into-`scratch` story is Linux only; on macOS the
-binary always links `libSystem` dynamically. And musl does not apply on macOS at
-all. The crate emits the CoreFoundation and Security frameworks for you on macOS.
+**macOS has two honest limits.** There is no fully-static macOS binary, because
+Mach-O has no static libc, so drop-into-`scratch` deployment is Linux only; on
+macOS the binary always links `libSystem` dynamically. And musl does not apply
+on macOS. The crate emits the CoreFoundation and Security frameworks for you
+on macOS.
 
 **Windows** is out of scope and untested natively: Go's cgo uses the MinGW
 toolchain while Rust defaults to MSVC, and reconciling that for a linked
@@ -62,9 +63,9 @@ host.
 
 ## When Go is not on the machine
 
-The build script never shells out to Docker on its own (rust-analyzer and CI
-sandboxes run build scripts constantly, and a `cargo build` must stay
-deterministic), so if Go is missing it fails with a message naming three
+The build script never shells out to Docker on its own, because rust-analyzer
+and CI sandboxes run build scripts constantly and a `cargo build` must stay
+deterministic, so if Go is missing it fails with a message naming three
 remedies:
 
 1. **Install Go 1.25 or newer** (and a C compiler), then `cargo build` compiles
@@ -76,7 +77,7 @@ remedies:
    `LLINGR_LIB_DIR` points somewhere the archive is not, the build warns and
    names the path rather than failing with an opaque linker error.
 3. **Build your whole application inside the provided builder image**
-   (`docker/Dockerfile.builder`, which carries both Go and Rust), so the machine
+   (`docker/Dockerfile`, which contains both Go and Rust), so the machine
    needs only Docker.
 
 ## What static linking means here
@@ -85,8 +86,8 @@ The engine links as a static C archive (`libllingr.a`), which the build script
 folds into your binary along with the Go runtime's C dependencies
 (`-lpthread -lm -ldl`). The result is a single self-contained executable: there
 is no `libllingr.so` to deploy beside it, no runtime library resolution, and no
-`LD_LIBRARY_PATH`. For a fully static binary with no dynamic loader at all (the
-prerequisite for a `scratch` image), build with the static C runtime, scoped to
+`LD_LIBRARY_PATH`. For a fully static binary with no dynamic loader, the
+prerequisite for a `scratch` image, build with the static C runtime, scoped to
 your target triple:
 
 ```sh
@@ -96,7 +97,7 @@ cargo build --release --target x86_64-unknown-linux-gnu
 
 Scope the flag to the target with `CARGO_TARGET_<TRIPLE>_RUSTFLAGS` and an
 explicit `--target`; do not set it globally through `RUSTFLAGS`. llingr-kafka
-pulls in proc-macro dependencies (serde's and prometheus-client's derive macros),
+has proc-macro dependencies, serde's and prometheus-client's derive macros,
 and a proc-macro cannot be built as a static library, so a global `+crt-static`
 fails the build with "cannot produce proc-macro ... target does not support these
 crate types". The target-scoped form makes cargo compile proc-macros and build
@@ -104,9 +105,9 @@ scripts for the host without the flag and apply `+crt-static` only to the final
 binary. On ARM, use `aarch64-unknown-linux-gnu` and the matching
 `CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS`.
 
-The engine's own DNS is pure Go (the archive is built with the `netgo` tag), so
-the usual static-glibc caveat about `libc` name resolution does not bite: broker
-addresses resolve through Go's resolver, not the C `nsswitch` machinery.
+The engine's own DNS is pure Go, built with the `netgo` tag, so the usual
+static-glibc caveat about `libc` name resolution does not bite: broker addresses
+resolve through Go's resolver, not the C `nsswitch` machinery.
 
 ## Building through the Makefile
 
@@ -129,8 +130,8 @@ image**, so the containerised build runs identical commands to the native one.
 Two targets are worth knowing when you are provisioning a build environment.
 `make doctor` proves that this environment can actually build and link the engine,
 not just that the tools are present: it builds the engine archive and then links a
-test binary against it, printing one `PROVISIONED` or `NOT PROVISIONED` verdict
-(it is native-only, so run it inside the environment you are validating). And
+test binary against it, printing one `PROVISIONED` or `NOT PROVISIONED` verdict;
+it is native-only, so run it inside the environment you are validating. And
 `make test` is self-sufficient on a fresh clone: it builds the engine before its
 checks, so you never need to run `make engine` by hand first. The full target
 list and the contributor-facing detail are in `docs/internal/BUILDING.md`.
@@ -154,42 +155,42 @@ CC=aarch64-linux-gnu-gcc CXX=aarch64-linux-gnu-g++ \
   cargo build --release --target aarch64-unknown-linux-gnu
 ```
 
-macOS Apple Silicon building for macOS Intel needs no environment variables at
-all, because `build.rs` handles the darwin-to-darwin cross for you (auto-supplying
-`CC="cc -arch x86_64"`, an explicit `CC` still winning):
+macOS Apple Silicon building for macOS Intel needs no environment variables,
+because `build.rs` handles the darwin-to-darwin cross for you, auto-supplying
+`CC="cc -arch x86_64"` with an explicit `CC` still winning:
 
 ```sh
 rustup target add x86_64-apple-darwin
 cargo build --release --target x86_64-apple-darwin
 ```
 
-The build script maps the cargo target to `GOOS`/`GOARCH` for you (respecting an
-explicit `GOOS`/`GOARCH` you export), and for a non-darwin cross build with `CC`
+The build script maps the cargo target to `GOOS`/`GOARCH` for you, respecting an
+explicit `GOOS`/`GOARCH` you export, and for a non-darwin cross build with `CC`
 unset it fails early and says exactly that, rather than letting the host compiler
 reject the foreign architecture deep in cgo. For the Linux cross recipe, pass
 `CC`/`CXX` command-scoped as above rather than exporting them: `build.rs` trusts a
 set `CC`, so a `CC`/`CXX` export left over from a cross build poisons the next
 native build with wrong-architecture objects; if you did export them, `unset CC
-CXX GOOS GOARCH` before building natively again (the darwin recipe sets nothing,
-so there is nothing to leak). The alternative to the whole recipe is to build the
-engine on a machine of the target architecture once and carry it in with
+CXX GOOS GOARCH` before building natively again, since the darwin recipe sets
+nothing and there is nothing to leak. The alternative to the whole recipe is to build the
+engine on a machine of the target architecture once and bring it in with
 `LLINGR_LIB_DIR`. Both recipes above are validated on real hardware.
 
 ## Building your own build image
 
 To provision a CI runner or custom container that compiles llingr-kafka, the
-toolchain needs a Go 1.25+ toolchain, Rust (edition 2021, MSRV 1.78), and a C
+toolchain needs a Go 1.25+ toolchain, Rust at edition 2021 and MSRV 1.78, and a C
 compiler (`gcc` or `clang`); on Linux the default path is glibc. The franz-only
-engine links no external C library (there is no librdkafka), so the image stays
+engine links no external C library and there is no librdkafka, so the image stays
 minimal. The build sets `CGO_ENABLED=1` itself and emits the system libraries it
-needs (`-lpthread -lm -ldl` on Linux, CoreFoundation and Security on macOS), so
-the image only supplies the compiler and linker. `make` is optional (only for the
-Makefile entry points) and `git` is not needed at all.
+needs, `-lpthread -lm -ldl` on Linux and CoreFoundation and Security on macOS, so
+the image only supplies the compiler and linker. `make` is optional, only for the
+Makefile entry points, and `git` is not needed.
 
 The source-of-truth versions live in the repository: the Rust MSRV in
-`Cargo.toml` (the `rust-version` field), and the Go floor in `bridge/go.mod` (the
-`go` directive, currently `go 1.25.0`; `build.rs` enforces `>= 1.25`). The proven
-image shape is the official Go image plus rustup:
+`Cargo.toml`'s `rust-version` field, and the Go floor in `bridge/go.mod`'s `go`
+directive, currently `go 1.25.0`, with `build.rs` enforcing `>= 1.25`. The proven
+image recipe is the official Go image plus rustup:
 
 ```dockerfile
 FROM golang:1.25-bookworm
@@ -200,7 +201,7 @@ ENV PATH=/root/.cargo/bin:$PATH
 
 Do not base a build image on Alpine today (musl is a deliberate build-time
 failure; see the musl section below). The full requirements matrix, the musl
-provisioning-ahead note, and the runtime-libc story are in
+provisioning-ahead note, and the runtime-libc detail are in
 `docs/internal/BUILDING.md`.
 
 ## Deploying to a scratch image
@@ -208,7 +209,7 @@ provisioning-ahead note, and the runtime-libc story are in
 Because the binary is self-contained, the deployment image can be `scratch`: no
 libc, no shell, no package manager, nothing but your binary and the kernel. That
 is both the smallest artefact and the smallest attack surface. The pattern is a
-single build stage carrying both toolchains, a static build, and a `scratch`
+single build stage with both toolchains, a static build, and a `scratch`
 runtime stage that copies just the binary:
 
 ```dockerfile
@@ -236,16 +237,16 @@ COPY --from=build /your-app /your-app
 ENTRYPOINT ["/your-app"]
 ```
 
-The single build stage carries both toolchains because the crate's build script
+The single build stage contains both toolchains because the crate's build script
 compiles the Go engine during `cargo build`, so the same stage that builds your
 Rust code also builds the bridge, even though your Dockerfile never mentions Go
 or the bridge: cargo brings them in with the dependency. The crate's own
-`example/Dockerfile.consumer` uses a path-dependency variant of this same
+`examples/e2e/Dockerfile.consumer` uses a path-dependency variant of this same
 pattern: it additionally copies the crate's `src/` and `bridge/` into the build
 stage because it builds llingr-kafka in-tree rather than fetching it from
 crates.io. That is a consequence of the example living beside the crate, not
 something a crates.io consumer does; `docs/example.md` walks through it. If you
-cannot use `scratch` (a mandated base image, or in-container debugging), a
+cannot use `scratch`, whether a mandated base image or in-container debugging, a
 distroless or debian-slim runtime stage works the same way; it is larger only
 because it ships a libc.
 
@@ -253,9 +254,9 @@ because it ships a libc.
 
 Static linking embeds third-party Go components in your binary, and some of their
 licences require attribution when you distribute the binary. These components are
-invisible to Rust-side tooling (cargo, cargo-deny, and the crates.io metadata
-never see them), so the obligation is easy to miss. The one you must carry is the
-Kafka client: **franz-go (`github.com/twmb/franz-go`) is BSD-3-Clause**, whose
+invisible to Rust-side tooling, since cargo, cargo-deny, and the crates.io
+metadata never see them, so the obligation is easy to miss. The one you must
+carry is the Kafka client: **franz-go (`github.com/twmb/franz-go`) is BSD-3-Clause**, whose
 licence requires its notice and licence text to accompany binary distributions;
 other transitive Go dependencies carry their own permissive notices.
 

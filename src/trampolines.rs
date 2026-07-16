@@ -22,8 +22,9 @@ use crate::engine::handlers;
 
 /// Write up to `cap` bytes of `s` into the C buffer `buf`, truncated at a
 /// UTF-8 char boundary, storing the byte count in `len_out`. No-op if any
-/// pointer is null or `cap <= 0`. Used to hand a callback's error text back to
-/// the Go bridge without a cross-allocator transfer (the bridge owns `buf`).
+/// pointer is null or `cap <= 0`. Used to hand a callback's error text back
+/// to the Go bridge without a cross-allocator transfer; the bridge owns
+/// `buf`.
 ///
 /// SAFETY: `buf` must be valid for `cap` bytes and `len_out` for one c_int,
 /// for the duration of the call.
@@ -40,10 +41,10 @@ unsafe fn write_c_err(buf: *mut c_char, cap: c_int, len_out: *mut c_int, s: &str
     *len_out = n as c_int;
 }
 
-/// Print a one-line diagnostic to stderr without ever unwinding. A plain
-/// `eprintln!` panics if stderr is closed (broken pipe); in a catch_unwind
-/// failure arm that panic would unwind out of `extern "C"` and abort the
-/// process, so we use a fallible write and discard the result.
+/// Print a one-line diagnostic to stderr without unwinding. A plain
+/// `eprintln!` panics if stderr is closed on a broken pipe; on the
+/// catch_unwind failure path that panic would unwind out of `extern "C"` and
+/// abort the process, so this is a fallible write with the result discarded.
 fn report(msg: &str) {
     let _ = writeln!(std::io::stderr(), "{msg}");
 }
@@ -56,14 +57,14 @@ fn report(msg: &str) {
 /// which would otherwise be a use-after-free the signatures did nothing to stop.
 pub(crate) struct CallScope;
 
-/// Drop a caught panic payload without ever unwinding out of the caller. The
-/// usual payload (the `String`/`&str` a `panic!` produces) drops cheaply here.
-/// A pathological payload whose own `Drop` panics (reachable from safe handler
-/// code via `std::panic::panic_any`) is contained by the inner catch and then
+/// Drop a caught panic payload without unwinding out of the caller. The usual
+/// payload, the `String` or `&str` a `panic!` produces, drops cheaply here. A
+/// pathological payload whose own `Drop` panics, reachable from safe handler
+/// code via `std::panic::panic_any`, is contained by the inner catch and then
 /// leaked: letting that second unwind escape the surrounding `extern "C"`
-/// trampoline would abort the whole process (RFC 2945), the exact outcome the
-/// trampolines' panic containment exists to prevent. The leak happens only on a
-/// doubly-pathological payload, never on the normal panic path.
+/// trampoline would abort the whole process per RFC 2945, the exact outcome
+/// the trampolines' panic containment exists to prevent. The leak happens only
+/// on a doubly-pathological payload, never on the normal panic path.
 fn drop_panic_payload(payload: Box<dyn std::any::Any + Send>) {
     if let Err(nested) = panic::catch_unwind(panic::AssertUnwindSafe(move || drop(payload))) {
         std::mem::forget(nested);
@@ -89,9 +90,10 @@ fn decode_timestamp(kind: i8, millis: i64) -> Timestamp {
     }
 }
 
-/// Borrow the C header array as nexus `Header` views. `value_len < 0` is a null
-/// value (distinct from empty). Keys are UTF-8 (an invalid key decodes to "").
-/// The returned views borrow the C buffers, valid only for the callback.
+/// Borrow the C header array as nexus `Header` views. `value_len < 0` is a
+/// null value, distinct from empty. Keys are UTF-8; an invalid key decodes
+/// to "". The returned views borrow the C buffers, valid only for the
+/// callback.
 ///
 /// SAFETY: `headers` must point to `count` valid `HeaderRaw` whose string
 /// pointers are valid for the duration of the call.
@@ -154,10 +156,10 @@ pub(crate) unsafe extern "C" fn process_trampoline(
         let scope = CallScope;
 
         // SAFETY: the Go bridge guarantees key/value/header pointers are valid
-        // for the call. The key is UTF-8-safe (raw if valid, base64 if binary,
-        // partition number if absent). value_len == -1 is a null value (a
-        // tombstone), delivered as None; 0 is an empty value, delivered as
-        // Some(&[]), the same convention the headers use. Topic is fixed per
+        // for the call. The key is UTF-8-safe: raw if valid, base64 if
+        // binary, the partition number if absent. value_len == -1 is a null
+        // value, a tombstone, delivered as None; 0 is an empty value,
+        // delivered as Some(&[]), the same convention the headers use. Topic is fixed per
         // consumer, read from the handler set. The header views borrow the C
         // buffers and live until the callback returns.
         let header_views = unsafe { borrow_headers(&scope, headers, header_count) };
@@ -225,13 +227,14 @@ pub(crate) unsafe extern "C" fn deadletter_trampoline(
         // `scope` ties every borrow below to this callback invocation.
         let scope = CallScope;
 
-        // Go error strings carry no UTF-8 guarantee (they can embed broker
-        // bytes), so decode lossily rather than fabricating an invalid &str.
+        // Go error strings have no UTF-8 guarantee, because they can embed
+        // broker bytes, so decode lossily rather than fabricating an invalid
+        // &str.
         let error_str =
             String::from_utf8_lossy(unsafe { borrow_bytes(&scope, error_msg, error_len) });
 
-        // SAFETY / field notes: see process_trampoline (value_len == -1 is a
-        // null value, delivered as None). Topic comes from the handler set;
+        // SAFETY / field notes: see process_trampoline; value_len == -1 is a
+        // null value, delivered as None. Topic comes from the handler set;
         // the header views borrow C buffers for the call.
         let header_views = unsafe { borrow_headers(&scope, headers, header_count) };
         let msg = Message::new(
@@ -326,9 +329,9 @@ pub(crate) unsafe extern "C" fn shutdown_trampoline(reason: *const c_char, reaso
     }
 }
 
-/// Bandwidth trampoline: called from Go on each aggregator flush (only
+/// Bandwidth trampoline: called from Go on each aggregator flush. Only
 /// registered with the bridge when a bandwidth handler was staged at build
-/// time; registration is what enables collection). Off the message hot
+/// time, and registration is what enables collection. Off the message hot
 /// path, so building an owned [`BandwidthMetrics`] here is fine.
 ///
 /// SAFETY: the Go bridge guarantees every pointer (strings, both arrays and
@@ -348,8 +351,9 @@ pub(crate) unsafe extern "C" fn bandwidth_trampoline(
     partition_count: c_int,
 ) {
     // Decode into owned Rust data BEFORE catch_unwind so no raw pointer
-    // logic runs inside the unwind boundary; the decode itself cannot panic
-    // (borrow_bytes handles null/negative, from_utf8_lossy never fails).
+    // logic runs inside the unwind boundary; the decode itself cannot panic,
+    // since borrow_bytes handles null/negative and from_utf8_lossy never
+    // fails.
     let scope = CallScope;
     let owned_str = |ptr, len| String::from_utf8_lossy(borrow_bytes(&scope, ptr, len)).into_owned();
 
@@ -405,12 +409,12 @@ pub(crate) unsafe extern "C" fn bandwidth_trampoline(
     }
 }
 
-/// Log trampoline: called from Go for each engine log line (only routed by
-/// the bridge when a log handler was registered at build time).
+/// Log trampoline: called from Go for each engine log line; the bridge
+/// routes lines only when a log handler was registered at build time.
 pub(crate) unsafe extern "C" fn log_trampoline(level: c_int, msg: *const c_char, msg_len: c_int) {
     if let Err(payload) = panic::catch_unwind(|| {
         let scope = CallScope;
-        // Go-formatted log text: decode lossily (no UTF-8 guarantee).
+        // Go-formatted log text: no UTF-8 guarantee, so decode lossily.
         let text = String::from_utf8_lossy(borrow_bytes(&scope, msg, msg_len));
 
         if let Some(h) = handlers() {
@@ -427,14 +431,15 @@ pub(crate) unsafe extern "C" fn log_trampoline(level: c_int, msg: *const c_char,
 // Boundary regression tests
 //
 // These exercise the FFI trampolines directly with crafted pointers, no broker
-// and no engine lifecycle, pinning the review findings so they cannot regress:
-//   F1  lossy UTF-8 for Go-origin error/reason strings
-//   F2  64-bit offsets/traits/timestamps survive (no c_long truncation) and
-//       every metrics argument maps one-to-one onto its Metrics field
-//   F5  the process handler's own error text reaches the dead-letter path
-//   F7  a panicking handler is contained (no process abort)
-//   ABI the crate constant matches the linked library's reported version
-//   LOG log lines round-trip with level mapping and lossy decode
+// and no engine lifecycle, pinning these boundary guarantees so they cannot
+// regress:
+//   - Go-origin error/reason strings decode lossily
+//   - 64-bit offsets/traits/timestamps survive without c_long truncation, and
+//     every metrics argument maps one-to-one onto its Metrics field
+//   - the process handler's own error text reaches the dead-letter path
+//   - a panicking handler is contained, never a process abort
+//   - the crate's ABI constant matches the linked library's reported version
+//   - log lines round-trip with level mapping and lossy decode
 //
 // The handler set is process-global and published once, so a single set is
 // shared by all tests; the test handlers dispatch on the message key, and each
@@ -509,7 +514,7 @@ mod boundary_tests {
     struct TDead;
     impl DeadLetterHandler for TDead {
         fn handle(&self, msg: &Message, error_msg: &str) -> Result<(), Box<dyn Error>> {
-            // Marker keys drive the trampoline's failure arms, mirroring TProc.
+            // Marker keys drive the trampoline's failure paths, mirroring TProc.
             match msg.key_str() {
                 Some("dlq-err-marker") => return Err("dlq write failed".into()),
                 Some("dlq-panic-marker") => panic!("intentional dlq panic"),
@@ -578,8 +583,8 @@ mod boundary_tests {
         });
     }
 
-    /// Invoke the process trampoline (no timestamp, no headers); returns
-    /// (rc, traits_out, error_text).
+    /// Invoke the process trampoline with no timestamp and no headers;
+    /// returns (rc, traits_out, error_text).
     fn call_process(key: &str, value: &[u8], offset: i64) -> (c_int, i64, String) {
         let mut traits_out: i64 = 0;
         let mut err_buf = [0 as c_char; 256];
@@ -740,8 +745,9 @@ mod boundary_tests {
     #[test]
     fn f7_panic_is_contained_and_reported() {
         seal();
-        // If F7 regressed (unwind escaping extern "C"), this aborts the test
-        // binary instead of returning. Reaching the asserts proves containment.
+        // If panic containment regresses, the unwind escapes extern "C" and
+        // aborts the test binary instead of returning. Reaching the asserts
+        // proves containment.
         let (rc, _t, err) = call_process("panic-marker", b"v", 1002);
         assert_eq!(rc, 1, "a panicking handler routes to dead letter");
         assert_eq!(err, "panic in process callback");
@@ -749,9 +755,9 @@ mod boundary_tests {
 
     /// A panic whose PAYLOAD has a panicking `Drop` must also be contained: if
     /// the caught payload were dropped outside `catch_unwind`, that second
-    /// unwind would escape the `extern "C"` trampoline and abort the process
-    /// (SIGABRT on rustc >= 1.81, UB below it). Reaching the asserts instead of
-    /// aborting the test binary proves `drop_panic_payload` contains it.
+    /// unwind would escape the `extern "C"` trampoline and abort the process,
+    /// SIGABRT on rustc >= 1.81 and UB below it. Reaching the asserts instead
+    /// of aborting the test binary proves `drop_panic_payload` contains it.
     #[test]
     fn f7_panicking_drop_payload_is_contained() {
         seal();
@@ -766,8 +772,8 @@ mod boundary_tests {
     // The remaining four trampolines are void (no rc), so a panicking handler
     // can only be CONTAINED, never signalled. Each test reaches its final line
     // instead of aborting the binary, which proves containment. The metrics
-    // case uses the evil-Drop payload, exercising drop_panic_payload on a void
-    // trampoline (the one shape the process test cannot cover).
+    // case uses the evil-Drop payload, exercising drop_panic_payload on a
+    // void trampoline, the one path the process test cannot cover.
 
     #[test]
     fn metrics_panicking_handler_is_contained() {
@@ -904,10 +910,10 @@ mod boundary_tests {
 
     /// Every one of the nine metrics arguments must land on ITS OWN Metrics
     /// field. Five are same-typed adjacent i64s, so a transposed pair in the
-    /// trampoline's Metrics construction would pass the ABI checks (abi.lock
-    /// pins the C signature, not this Rust-side mapping); distinct sentinels
-    /// make any swap visible. All i64 sentinels exceed 32 bits, so a c_long
-    /// truncation would also fail here (the original F2 property).
+    /// trampoline's Metrics construction would pass the ABI checks, because
+    /// abi.lock pins the C signature, not this Rust-side mapping; distinct
+    /// sentinels make any swap visible. All i64 sentinels exceed 32 bits, so
+    /// a c_long truncation would also fail here.
     #[test]
     fn f2_metrics_fields_map_one_to_one_and_carry_full_64_bits() {
         seal();
@@ -953,7 +959,7 @@ mod boundary_tests {
     #[test]
     fn f1_deadletter_tolerates_non_utf8_error() {
         seal();
-        // Go error strings carry no UTF-8 guarantee; feed raw invalid bytes.
+        // Go error strings have no UTF-8 guarantee; feed raw invalid bytes.
         let bad = [0x66u8, 0x6f, 0x6f, 0xff, 0xfe]; // "foo" + two invalid bytes
         let offset: i64 = 1004;
         unsafe {

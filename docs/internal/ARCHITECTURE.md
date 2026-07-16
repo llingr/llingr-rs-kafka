@@ -5,7 +5,7 @@ llingr-demux engine, what crosses the FFI boundary and in what form, and the ABI
 discipline that keeps the two sides in step. The user-facing behaviour built on
 top of this lives in the `docs/` pages; here we are under the hood.
 
-## The shape of the binding
+## The design of the binding
 
 llingr-kafka does not reimplement the engine. It embeds the actual Go
 llingr-demux engine and its franz-go broker layer, compiled together into a
@@ -41,8 +41,8 @@ Your application (ProcessHandler and DeadLetterHandler)
 
 ## The two sides of the boundary
 
-**The Go bridge (`bridge/`).** A small `package main` (AGPL-3.0-only, like the
-engine) compiled into the archive. It carries the C preamble (callback typedefs
+**The Go bridge (`bridge/`).** A small `package main`, AGPL-3.0-only like the
+engine, compiled into the archive. It contains the C preamble (callback typedefs
 and the trampolines cgo needs, because cgo cannot invoke a C function pointer
 directly), the exported C functions, the JSON configuration contract and its
 validation, and the adapter wiring, collapsed to the franz path only. It pins
@@ -80,8 +80,8 @@ events; documents cross as documents.** Applying it:
   the Rust `metrics.rs` aggregates the scalars into prometheus-client registries
   and renders the exposition format only at scrape time.
 - **Bandwidth telemetry crosses raw.** Broker topology and per-partition byte
-  counters cross as `repr(C)` structs (with the arrays as C-allocated arenas
-  valid for the callback's duration), their layouts pinned by `offset_of!` tests.
+  counters cross as `repr(C)` structs, their arrays as C-allocated arenas valid
+  for the callback's duration, with layouts pinned by `offset_of!` tests.
 - **Records cross raw.** The process and dead-letter callbacks hand over raw
   pointers and lengths, with headers as a `repr(C)` array. A `value_len` of `-1`
   marks a NULL value (a tombstone), which is distinct from an empty value.
@@ -89,7 +89,7 @@ events; documents cross as documents.** Applying it:
   engine's canonical JSON document as a C string (freed with
   `llingr_free_string`), and `snapshot.rs` ships typed serde structs over it.
   The snapshot is cold, large, and fast-evolving diagnostics, so a `repr(C)`
-  layout would chain every new diagnostic field to an ABI bump; the JSON document
+  layout would chain every new diagnostic field to an ABI version increment; the JSON document
   is deliberately byte-identical to what the Go engine's own HTTP snapshot
   handler serves, and serde's tolerance of unknown fields gives forward
   compatibility.
@@ -131,12 +131,12 @@ depends on whether the handler has a failure path:
 
 All of this relies on the `unwind` panic profile, which is Rust's default. The
 crate's `build.rs` detects `panic = "abort"` at build time and emits a loud
-`cargo::warning` (not a hard error, because a consumer may knowingly accept
-process-per-message semantics), because under `abort` the first handler panic
-kills the whole process before `catch_unwind` can run. (The `ProcessHandler` and
+`cargo::warning`, not a hard error, because a consumer may knowingly accept
+process-per-message semantics: under `abort` the first handler panic kills the
+whole process before `catch_unwind` can run. The `ProcessHandler` and
 `DeadLetterHandler` panic behaviour above is confirmed in the landed
 `src/trampolines.rs`, where both the `Err` return and a caught panic yield the
-same dead-letter failure code.)
+same dead-letter failure code.
 
 Symmetrically, a Go panic escaping to the C boundary would kill the host process,
 so the bridge recovers at the entry points that execute engine code
@@ -151,13 +151,13 @@ keep) is documented in `docs/processing.md`:
 - **Message data flows Go-to-Rust as borrowed pointers**, valid only for the
   duration of the callback. `Message<'a>` encodes this as a lifetime; retaining
   the bytes past the callback is not a crash but silently wrong data, because the
-  buffers are recycled. Copy out (`to_vec`, `to_string`) anything kept.
-- **Error text flows Rust-to-Go through a Go-owned buffer** (`err_buf`, a fixed
-  capacity, truncated at a UTF-8 boundary), so no allocation crosses the
+  buffers are recycled. Copy out anything kept with `to_vec` or `to_string`.
+- **Error text flows Rust-to-Go through a Go-owned buffer** `err_buf`, of fixed
+  capacity and truncated at a UTF-8 boundary, so no allocation crosses the
   allocator boundary in either direction.
-- **Strings from Go carry no UTF-8 guarantee** (they can embed broker bytes), so
-  dead-letter reasons, shutdown reasons, and log lines are decoded lossily on the
-  Rust side. The partition key is the exception: the adapter guarantees it
+- **Strings from Go have no UTF-8 guarantee**, since they can embed broker bytes,
+  so dead-letter reasons, shutdown reasons, and log lines are decoded lossily on
+  the Rust side. The partition key is the exception: the adapter guarantees it
   UTF-8-safe by construction.
 
 ## Callback registration and threading
@@ -178,7 +178,7 @@ so the facade's documented build-retry path re-registers cleanly.
 
 ## ABI versioning and the drift guard
 
-The FFI contract carries an integer version, currently **v1**, defined twice on
+The FFI contract has an integer version, currently **v1**, defined twice on
 purpose: `abiVersion` in the bridge's `main.go` and `LLINGR_ABI_VERSION` in
 `src/ffi.rs`. `Builder::build()` compares the crate's constant with the loaded
 library's report and refuses to run on a mismatch, converting what would be
@@ -188,12 +188,12 @@ signature or a callback typedef, with the reason recorded next to each. v1 is th
 first released contract; the unpublished revisions that preceded it were
 renumbered away.
 
-A separate `abi-check/` tool is the compile-time drift guard. It pulls in the
-crate's real FFI declarations by including `src/ffi.rs` through a `#[path]`
-attribute (so it never builds the Go engine itself), discovers the cgo-emitted
-header at `dist/<target-triple>/libllingr.h`, regenerates the C contract from it,
-and fails compilation if the declarations have drifted. It keeps a LOCAL,
-gitignored lockfile (`abi-check/abi.lock`, listed in `.gitignore`) that records
+A separate `abi-check/` tool is the compile-time drift guard. It includes the
+crate's real FFI declarations from `src/ffi.rs` through a `#[path]` attribute, so
+it never builds the Go engine itself; discovers the cgo-emitted header at
+`dist/<target-triple>/libllingr.h`; regenerates the C contract from it; and fails
+compilation if the declarations have drifted. It keeps a LOCAL,
+gitignored lockfile `abi-check/abi.lock`, listed in `.gitignore`, that records
 the contract version and a signature; at ABI v1 the lock reads `version = 1` with
 signature `e419c328dcfbc4d2`. A deliberate ABI change is made with
 `UPDATE_ABI_LOCK=1`, so the lock is never shared or reviewed, and `make test`

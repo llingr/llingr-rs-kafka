@@ -50,7 +50,7 @@ docker exec redpanda rpk cluster health
 
 `rpk` is RedPanda's CLI, and it ships inside the container, so you run it with
 `docker exec` rather than installing anything. This mirrors the pinned image and
-flags in the crate's own example stack (`example/docker-compose.yml`,
+flags in the crate's own example stack (`examples/e2e/docker-compose.yml`,
 `redpandadata/redpanda:v24.2.7`); the only difference is the advertised address,
 `localhost` here so you can reach the broker from the host, versus the container
 name on the compose network.
@@ -76,7 +76,7 @@ cargo add log env_logger
 `llingr-kafka` is the consumer crate. `log` and `env_logger` are how you see
 output: the engine routes its own log lines into the `log` facade under the
 target `llingr`, and `env_logger` prints whatever the facade receives, so the
-same two lines that light up your handler's logs also surface the engine's
+same two lines that light up your handler's logs also show the engine's
 lifecycle. There are no crate features to enable; llingr-kafka is pre-baked.
 
 ## Step 4: write the consumer
@@ -176,12 +176,12 @@ You now have the whole chain working. To go deeper:
 - `docs/processing.md` for the handler contract in full: per-key ordering, the
   at-least-once delivery guarantee and how to make processing idempotent, the
   message accessors, and attaching your own trait bits.
-- `docs/configuration.md` for the engine tuning knobs (worker concurrency,
+- `docs/configuration.md` for the engine tuning settings (worker concurrency,
   timeouts) and their defaults.
 - `docs/kafka-options.md` and `docs/security.md` for connecting to a real
   cluster with TLS and SASL rather than a local plaintext broker.
 - `docs/operations.md` for running in production: graceful shutdown, signal
   handling, snapshots, and liveness.
-- The crate's own `example/` stack is the full end-to-end proof (a pure-Rust
-  producer and a metrics-exposing consumer against RedPanda), walked through in
+- The crate's own `examples/e2e/` stack is the full end-to-end proof, a pure-Rust
+  producer and a metrics-exposing consumer against RedPanda, walked through in
   `docs/example.md`.

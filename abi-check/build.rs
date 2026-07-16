@@ -5,23 +5,22 @@
 //! archive. Only `llingr_*` items are kept: the Go runtime scaffolding in the
 //! header (GoString and friends) is irrelevant to the ABI under test.
 //!
-//! The bindgen passes below catch a divergence between the two hand-matched C
-//! contract copies. They do NOT, on their own, force the ABI version to move
-//! when the surface changes, and their LUB check treats a same-typed argument
-//! reorder as identical. The lock mechanism at the bottom of this file closes
-//! both gaps:
+//! The bindgen passes below catch a divergence between the two C contract
+//! copies. They do NOT, on their own, force the ABI version to move
+//! when the contract changes, and their LUB check treats a same-typed argument
+//! reorder as identical. The lock mechanism below closes both gaps:
 //!
 //! - It snapshots the `llingr_*` declaration text from the emitted header
 //!   (parameter names included, so a same-typed reorder changes the hash) and
 //!   pins the hash in `abi.lock`.
-//! - It reads the two hand-written version constants (`const abiVersion` in
+//! - It reads the two version constants (`const abiVersion` in
 //!   `bridge/main.go`, `LLINGR_ABI_VERSION` in `src/ffi.rs`) and fails the
-//!   build when the surface moved but neither constant did.
+//!   build when the contract moved but neither constant did.
 //!
-//! Discipline: any change to the FFI surface must bump BOTH version constants
-//! and then regenerate the lock with `UPDATE_ABI_LOCK=1 cargo build`. A pure
-//! ABI-meaning change (same C shapes, new semantics, e.g. a new sentinel
-//! value) still bumps the constants and is committed by regenerating the lock
+//! A change to the FFI contract increments both version constants and
+//! regenerates the lock with `UPDATE_ABI_LOCK=1 cargo build`. A pure
+//! ABI-meaning change (identical C declarations, new semantics, e.g. a new
+//! sentinel value) also increments the constants, with the lock regenerated
 //! deliberately.
 
 use std::env;
@@ -178,7 +177,7 @@ fn main() {
         .expect("writing gen_types.rs failed");
 
     // Pass B: the callback typedefs and exported functions, with the struct
-    // names aliased to the hand-written types. Signature checks against this
+    // names aliased to the ffi.rs types. Signature checks against this
     // module compare everything EXCEPT the structs' nominal identity (Rust fn
     // types cannot unify across two layout-identical nominal structs); the
     // structs themselves are covered by pass A.
@@ -195,8 +194,8 @@ fn main() {
         .write_to_file(out_dir.join("gen_fns.rs"))
         .expect("writing gen_fns.rs failed");
 
-    // ABI version lock. bindgen proves the two contract copies agree in shape;
-    // this proves the version constants moved whenever that shape did.
+    // ABI version lock. bindgen proves the two contract copies agree; this
+    // proves the version constants moved whenever the declarations did.
     let main_go = repo_root.join("bridge/main.go");
     let ffi_rs = repo_root.join("src/ffi.rs");
     let lock_path = manifest.join("abi.lock");
@@ -249,21 +248,21 @@ fn main() {
         match (lock_signature == signature, lock_version == version) {
             (true, true) => {}
             (false, true) => panic!(
-                "abi-check: the FFI surface changed but the ABI version was not bumped \
-                 (still {version}). Bump abiVersion (bridge/main.go) and LLINGR_ABI_VERSION \
+                "abi-check: the FFI contract changed but the ABI version did not (still \
+                 {version}). Increment abiVersion (bridge/main.go) and LLINGR_ABI_VERSION \
                  (src/ffi.rs), then regenerate abi-check/abi.lock with: {regenerate}"
             ),
             (false, false) => panic!(
-                "abi-check: the FFI surface changed and the ABI version moved (locked \
-                 {lock_version}, now {version}). If this is the intended coordinated bump, \
+                "abi-check: the FFI contract changed and the ABI version moved (locked \
+                 {lock_version}, now {version}). If this is the intended coordinated change, \
                  regenerate the lock with: {regenerate}"
             ),
             (true, false) => panic!(
                 "abi-check: the ABI version changed (locked {lock_version}, now {version}) \
-                 but the header signature is byte-identical. A bump with no surface change is \
-                 suspicious. Either revert the version, or, if the ABI MEANING changed without \
-                 a shape change (e.g. a new sentinel value), regenerate the lock deliberately \
-                 with: {regenerate}"
+                 but the header signature is byte-identical. A version change with no contract \
+                 change is suspicious. Either revert the version, or, if the ABI MEANING \
+                 changed without a declaration change (e.g. a new sentinel value), regenerate \
+                 the lock deliberately with: {regenerate}"
             ),
         }
     }

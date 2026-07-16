@@ -3,7 +3,7 @@
 This note is for people working on llingr-kafka itself: how the engine is built
 from source during `cargo build`, what the build script does in what order, how
 the Makefile ties it together, and the ABI discipline you keep when you touch the
-boundary. The user-facing build and deployment story is in
+boundary. The user-facing build and deployment guide is
 `docs/building-packaging.md`; this page is the mechanics behind it.
 
 Conceptually there are two artefacts. The Go engine compiles into a static C
@@ -38,15 +38,14 @@ Docker remedies rather than silently shelling out.
 
 The from-source path requires **Go 1.25 or newer** on `PATH`. `build.rs` runs
 `go version`, parses it, and fails if Go is absent or older than 1.25. The
-failure message names three remedies, and they are the same three the user docs
-carry:
+failure message names three remedies, the same three in the user docs:
 
 1. Install Go 1.25 or newer (and a C compiler), so `cargo build` compiles the
    engine from source.
 2. Build the engine once with `make engine` (which can use Docker) and set
    `LLINGR_LIB_DIR=dist/<target-triple>`.
 3. Build the whole application inside the provided builder image
-   (`docker/Dockerfile.builder`).
+   (`docker/Dockerfile`).
 
 ## Platforms and toolchains
 
@@ -97,7 +96,7 @@ to wire. Where you have a native runner for an architecture, use it.
   ```
 
   Gotcha: you do NOT need the full Xcode app (a large download for nothing); the
-  Command Line Tools carry the `clang`, linker, and macOS SDK that cgo and the
+  Command Line Tools provide the `clang`, linker, and macOS SDK that cgo and the
   final link need.
 
 `rustup` installs the host target by default, so a native build needs no `rustup
@@ -105,25 +104,25 @@ target add`; that command is only for cross-compilation, below.
 
 ### macOS: what is and is not possible
 
-Two honest limits shape macOS builds, both from the platform, not the crate:
+Two honest limits govern macOS builds, both from the platform, not the crate:
 
 - **There is no fully-static macOS binary.** Mach-O has no static libc, so the Go
   c-archive always links `libSystem` dynamically on macOS. The drop-into-a-
-  `scratch`-image, zero-userland story is therefore **Linux only**; on macOS the
-  binary always carries a dynamic dependency on the system libraries. This is not
-  something you can flag your way around.
-- **musl does not apply on macOS at all.** The musl story (and its build-time
-  failure) is a Linux concern; it has no meaning on darwin.
+  `scratch`-image, zero-userland deployment is therefore **Linux only**; on
+  macOS the binary always has a dynamic dependency on the system libraries.
+  This is not something you can flag your way around.
+- **musl does not apply on macOS.** musl, its build-time failure included, is
+  a Linux concern; it has no meaning on darwin.
 
-The one thing the crate does for you on macOS is emit the `CoreFoundation` and
-`Security` frameworks at link time (for the darwin trust-store backend of Go's
-`crypto/x509`), automatically, on `darwin` targets. Universal (fat) binaries are
+The one thing the crate does for you on macOS is automatically emit the
+`CoreFoundation` and `Security` frameworks at link time on `darwin` targets, for
+the darwin trust-store backend of Go's `crypto/x509`. Universal (fat) binaries are
 not produced as a single build; if you need one, build each architecture
 separately and merge them with `lipo`, which is untested here and offered only as
 a pointer.
 
-One benign note for macOS: running the bridge's tests with `go test -race` (as
-`make coverage` does) prints a harmless linker warning on macOS only,
+One benign note for macOS: running the bridge's tests with `go test -race`, as
+`make coverage` does, prints a harmless linker warning on macOS only,
 `ld: warning: ... malformed LC_DYSYMTAB ...`. It does not affect the build or the
 test results; ignore it.
 
@@ -139,8 +138,8 @@ distribution and build as on any Linux host.
 
 ## Target mapping and the go build
 
-The script maps the cargo target OS to `GOOS` (`linux` to `linux`, `macos` to
-`darwin`) and the arch to `GOARCH` (`x86_64` to `amd64`, `aarch64` to `arm64`),
+The script maps the cargo target OS to `GOOS`, `linux` to `linux` and `macos` to
+`darwin`, and the arch to `GOARCH`, `x86_64` to `amd64` and `aarch64` to `arm64`,
 and panics on anything outside that set. It sets `GOOS`/`GOARCH` only when the
 caller has not, so a deliberate cross build that exports them wins.
 
@@ -161,9 +160,8 @@ CGO_ENABLED=1 go build -tags netgo -buildmode c-archive -ldflags "-s -w" \
 
 `netgo` gives pure-Go DNS so the archive works on scratch images with no
 `nsswitch` machinery, and `-s -w` strips the Go-side symbol tables. Both are
-hard-coded: there is no build-tag or strip knob to configure them (the modular
-binding's `LLINGR_GO_TAGS`/`LLINGR_GO_STRIP` environment variables do not exist
-in this crate). The link directives emitted are `rustc-link-search` on the
+hard-coded; there is no build-tag or strip override.
+The link directives emitted are `rustc-link-search` on the
 archive's directory, `rustc-link-lib=static=llingr`, and the Go runtime's C
 dependencies after it on the link line: `-lpthread -lm -ldl`.
 
@@ -176,7 +174,7 @@ emit is macOS-only.
 
 ## Cross-compilation
 
-Cross-compiling (building for an architecture other than the one you are on) is
+Cross-compiling, building for an architecture other than the one you are on, is
 the genuinely fiddly case, because cgo compiles the engine's C glue with a C
 compiler and that compiler has to target the foreign architecture. Prefer a
 native runner for the target arch where you have one; reach for cross-compilation
@@ -201,7 +199,7 @@ unset. cgo builds the engine's C glue with the host compiler, which cannot targe
 another architecture. Set CC (and CXX) to a cross toolchain, e.g.
 CC=aarch64-linux-gnu-gcc CXX=aarch64-linux-gnu-g++, or set LLINGR_LIB_DIR to a
 prebuilt library.` The alternative to the whole recipe is to build the engine
-once on a machine of the target architecture and carry it in with
+once on a machine of the target architecture and bring it in with
 `LLINGR_LIB_DIR`.
 
 Worked example, an aarch64 host building for Linux x86_64 (validated on real
@@ -224,7 +222,7 @@ compilers, the `aarch64-unknown-linux-gnu` target, and the matching
 `CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER`.
 
 Worked example, macOS Apple Silicon building for macOS Intel: it needs no
-environment variables at all, because `build.rs` handles the darwin-to-darwin
+environment variables, because `build.rs` handles the darwin-to-darwin
 cross for you by auto-supplying `CC="cc -arch x86_64"` (or `arm64`), with an
 explicit `CC` still winning if you set one:
 
@@ -262,8 +260,8 @@ Both cross recipes above are validated on real hardware.
 If you are provisioning a CI runner or a custom container to compile llingr-kafka,
 here is exactly what the toolchain must provide, so you do not have to
 reverse-engineer it. The reassuring headline: the franz-only path links **no
-external C library** (there is no librdkafka), so the image stays minimal, a Go
-toolchain plus Rust plus a C compiler and nothing broker-specific.
+external C library** and there is no librdkafka, so the image stays minimal, a
+Go toolchain plus Rust plus a C compiler and nothing broker-specific.
 
 ### Toolchain requirements
 
@@ -278,7 +276,7 @@ The MSRV of 1.78 is verified, not inherited: the full suite is green on exactly
 1.78, and 1.77 refuses to build with "requires rustc 1.78 or newer". What drives
 it is the `llingr-nexus` 0.10.0 dependency, which declares `rust-version = "1.78"`,
 and cargo enforces dependency MSRV floors. The crate's own code needs nothing
-newer than `std::mem::offset_of` (stable since 1.77), so if `llingr-nexus` ever
+newer than `std::mem::offset_of`, stable since 1.77, so if `llingr-nexus`
 lowered its floor, this crate's intrinsic floor would drop to 1.77. Either way,
 `Cargo.toml`'s `rust-version` stays the source of truth.
 
@@ -291,9 +289,9 @@ Notes that save an image builder time:
   `Security` frameworks on macOS. The image just needs the compiler and linker.
 - **`make` is optional and `git` is not needed.** `make` is only the entry point
   for the Makefile targets; a plain `cargo build` needs no `make`. `git` is not
-  required at all: crates.io and the Go module proxy both fetch over HTTPS
-  without it (the reference builder image installs neither `git` nor anything
-  broker-specific, only `make` and `libclang-dev` for the abi-check bindgen).
+  required: crates.io and the Go module proxy both fetch over HTTPS without it,
+  and the reference builder image installs neither `git` nor anything
+  broker-specific, only `make` and `libclang-dev` for the abi-check bindgen.
 - **The libc floor is policy, not a magic number.** A binary built against a
   given glibc requires at least that glibc at runtime, unless it is built fully
   static with `crt-static` (Linux only). Build on the oldest glibc you intend to
@@ -309,7 +307,7 @@ per-target Rust linker).
 
 ### A minimal glibc build image
 
-The proven shape is the official Go image plus rustup; `docker/Dockerfile.builder`
+The proven recipe is the official Go image plus rustup; `docker/Dockerfile`
 is the living instance this skeleton is derived from:
 
 ```dockerfile
@@ -349,13 +347,13 @@ Makefile section above for the full description.
 
 - **Linux, default (dynamic):** a glibc at least as new as the one the binary was
   built against, and nothing else (no librdkafka, no broker library).
-- **Linux, `crt-static`:** nothing at all; the binary is fully self-contained and
+- **Linux, `crt-static`:** nothing; the binary is fully self-contained and
   drops into a `scratch` or distroless image (see the scratch-image deployment in
   `docs/building-packaging.md`).
 - **macOS:** always a dynamic dependency on `libSystem` (plus the CoreFoundation
   and Security frameworks); there is no static option on macOS.
 
-## The musl arm and the panic-profile warning
+## The musl seam and the panic-profile warning
 
 Two more `build.rs` behaviours worth knowing:
 
@@ -363,8 +361,8 @@ Two more `build.rs` behaviours worth knowing:
   (`CARGO_CFG_TARGET_ENV == "musl"`), the script panics immediately with the
   upstream-blocker message and the tracking-issue links, rather than producing a
   binary that segfaults in the Go runtime's init. This is one of three seams that
-  must carry the same message (the others are the Makefile and
-  `docker/Dockerfile.builder`); the full record and the flip instructions are in
+  must contain the same message (the others are the Makefile and
+  `docker/Dockerfile`); the full record and the flip instructions are in
   `docs/internal/MUSL.md`.
 - **The `panic = "abort"` warning.** The panic-to-dead-letter contract relies on
   unwinding, so the script emits a loud `cargo::warning` when it detects `panic =
@@ -383,10 +381,10 @@ PROFILE ?= release   # release | debug
 ```
 
 `MODE=auto` resolves to native when Go 1.25+, a C compiler, and cargo are all
-present, and to docker otherwise (an error if docker is also missing). **Docker
+present, and to docker otherwise, an error if docker is also missing. **Docker
 mode re-invokes the same make target with `MODE=native` inside the builder
-image** (`docker/Dockerfile.builder`, `golang:1.25-bookworm` plus Rust stable,
-make, and libclang for abi-check's bindgen), with the repo bind-mounted at
+image** `docker/Dockerfile`, which is `golang:1.25-bookworm` plus Rust
+stable, make, and libclang for abi-check's bindgen, with the repo bind-mounted at
 `/work` and the Go and cargo caches as named volumes. So the native and docker
 paths run identical commands and no logic is duplicated. `make ... LIBC=musl`
 fails with the shared musl message.
@@ -429,10 +427,10 @@ bridge through `build.rs`. It is a measurement command that emits
 `coverage-rust.lcov` and `bridge/coverage-bridge.out` with a human-readable
 summary per domain; the regression gate lives in CI, not in this target.
 
-CI enforces local, deterministic regression floors (not ratchets): `RUST_MIN_LINES`
-= 92 (currently 94.36% lines) and `GO_BRIDGE_MIN_LINES` = 74 (currently 76.9%
-statements), with codecov as the reporting layer under the `rust` and `go-bridge`
-flags. The floors live in `.github/workflows/coverage.yml`; that file is the
+CI enforces local, deterministic regression floors rather than ratchets:
+`RUST_MIN_LINES` = 92, currently 94.36% lines, and `GO_BRIDGE_MIN_LINES` = 74,
+currently 76.9% statements, with codecov as the reporting layer under the `rust`
+and `go-bridge` flags. The floors live in `.github/workflows/coverage.yml`; that file is the
 source of truth if the numbers move.
 
 The floors are deliberately below 100%, because some paths are not unit-coverable
@@ -440,7 +438,7 @@ and are covered by other suites instead, honestly accounted for rather than
 chased with brittle tests:
 
 - The **live engine lifecycle** (the success paths of `build()` and `run()`), the
-  **C-ABI `//export` surface**, and the **live-broker paths** cannot be unit
+  **C-ABI `//export` functions**, and the **live-broker paths** cannot be unit
   tested in-process. They are exercised by the Rust boundary tests (which feed
   synthesised C inputs to the trampolines against the linked archive) and by the
   compose example end-to-end run (`make example-verify`, see `docs/example.md`).
@@ -468,11 +466,11 @@ internals this guards are described in `docs/internal/ARCHITECTURE.md`.
 ## Updating the pinned engine
 
 The engine version lives in `bridge/go.mod` (published releases only, never a
-`replace` to a local checkout). To move it: bump the module in `bridge/go.mod`,
+`replace` to a local checkout). To move it: update the module version in `bridge/go.mod`,
 run `go mod tidy` in `bridge/`, rebuild, and run `make test`. If the nexus
-contract changed shape (new metrics fields, new traits, a changed callback
+contract changed (new metrics fields, new traits, a changed callback
 signature), the Rust types and the ABI version must move with it: extend
-`ffi.rs` and the affected modules, and bump both ABI constants when any C
+`ffi.rs` and the affected modules, and increment both ABI constants when any C
 signature changed. Updating the pinned engine does not do that for you.
 
 ## Repository layout
@@ -482,7 +480,7 @@ Cargo.toml            package llingr-kafka, links = "llingr", no cargo features
 build.rs              builds bridge/ into a static c-archive and links it (above)
 bridge/               the Go composition root (package main, AGPL), pins published modules
 src/
-  lib.rs              public surface and re-exports (nexus contract types at the root)
+  lib.rs              public API and re-exports (nexus contract types at the root)
   ffi.rs              raw extern "C" declarations, repr(C) types, the ABI constant
   engine.rs           Builder + Llingr (run/stop/emergency_stop/snapshot)
   config.rs           DemuxConfig -> bridge config JSON
@@ -492,7 +490,7 @@ src/
   metrics.rs          Prometheus sinks, Metrics::serve / registry, the exporter
   snapshot.rs         typed serde structs over the snapshot document
 abi-check/            the bindgen drift guard (dev tooling, not published)
-docker/Dockerfile.builder   the both-toolchains image MODE=docker builds inside
+docker/Dockerfile     the both-toolchains image MODE=docker builds inside
 Makefile              the single entry point
 docs/                 you are here (docs/internal/ for contributor notes)
 ```

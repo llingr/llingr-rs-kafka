@@ -45,23 +45,24 @@ func bridgeErrorf(code int, format string, args ...any) *bridgeError {
 // UnmarshalJSON accepts duration strings ("30s", "1500ms"). Zero-value fields
 // receive engine defaults at Build() time.
 type bridgeConfig struct {
-	Adapter       string             `json:"adapter"` // "" or "franz": the only broker composition this library ships
+	Adapter       string             `json:"adapter"` // "" or "franz"
 	Brokers       string             `json:"brokers"` // comma-separated
 	Topic         string             `json:"topic"`
 	ConsumerGroup string             `json:"consumer_group"`
 	KafkaConfig   map[string]string  `json:"kafka_config"` // librdkafka-style key/value pairs
 	Service       *serviceConfig     `json:"service"`      // optional service identity
-	Demux         config.DemuxConfig `json:"demux"`        // engine tunables
+	Demux         config.DemuxConfig `json:"demux"`        // engine settings
 	Bandwidth     *bandwidthConfig   `json:"bandwidth"`    // optional bandwidth intervals
 }
 
-// serviceConfig mirrors nexus.Service (Spec deliberately not exposed over FFI).
+// serviceConfig mirrors nexus.Service; Spec is deliberately not exposed over
+// the FFI.
 type serviceConfig struct {
 	Name string `json:"name"`
 	Team string `json:"team"`
 }
 
-// bandwidthConfig carries the optional bandwidth telemetry intervals as
+// bandwidthConfig holds the optional bandwidth telemetry intervals as
 // duration strings ("5000ms"). Collection itself is enabled by the host
 // registering the bandwidth callback, not by this object: absent intervals
 // take the engine defaults (1 minute stats cadence, 60s flush).
@@ -124,7 +125,7 @@ func parseBridgeConfig(data []byte) (bridgeConfig, *bridgeError) {
 	// it does NOT reach inside "demux": config.DemuxConfig has a custom
 	// UnmarshalJSON that silently ignores unknown keys. Validate the demux
 	// object's keys here against the tag set reflected off config.DemuxConfig
-	// so a mistyped tunable is a startup error, not a silently defaulted field.
+	// so a mistyped setting is a startup error, not a silently defaulted field.
 	if berr := validateDemuxKeys(data); berr != nil {
 		return cfg, berr
 	}
@@ -146,7 +147,7 @@ func parseBridgeConfig(data []byte) (bridgeConfig, *bridgeError) {
 
 // validateDemuxKeys rejects an unknown key inside the "demux" object. The
 // valid set is derived by reflection over config.DemuxConfig's json tags, so
-// the bridge never hand-duplicates the tunable list: an engine upgrade that
+// the bridge never duplicates the setting list: an engine upgrade that
 // renames or adds a field is picked up automatically.
 func validateDemuxKeys(data []byte) *bridgeError {
 	var doc map[string]json.RawMessage

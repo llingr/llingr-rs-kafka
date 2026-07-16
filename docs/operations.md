@@ -34,7 +34,7 @@ second `stop()` returns immediately while the first is still draining, rather
 than blocking behind it. Have exactly one place call the stopper, and treat that
 call's return as the signal that shutdown is complete. Graceful stop is the
 clean path: provided the drain completes within the
-`drain_timeout` engine knob (default 20 seconds), a rolling restart produces zero
+`drain_timeout` engine setting (default 20 seconds), a rolling restart produces zero
 duplicates, because the engine commits exactly the contiguous work it finished.
 The exception is work the drain could not finish in time: a drain timeout
 abandons it uncommitted, so it is redelivered at least once on the next start.
@@ -49,7 +49,7 @@ Two rules make `stop()` safe to reason about:
   workers, and your handlers run on those workers, so calling it from a
   `ProcessHandler` or `DeadLetterHandler` asks the engine to drain the very
   worker that is blocked in the call. The drain stalls until the engine gives
-  up on it (the `drain_timeout` engine knob, default 20 seconds) and that
+  up on it (the `drain_timeout` engine setting, default 20 seconds) and that
   message's completion is discarded. To shut down in response to a message, set
   a flag or send on a channel from the handler and call the stopper from another
   thread. Calling `stop()` from the optional shutdown handler is a harmless
@@ -200,9 +200,9 @@ fn build() -> Result<(), Box<dyn std::error::Error>> {
 
 ## Exiting without stopping is safe but wasteful
 
-If the process exits without a graceful `stop()` (a crash, a `SIGKILL`, or just
-letting `main` return while `run()` is on another thread), you lose no
-acknowledged work. The engine only ever commits contiguous completed work, so
+If the process exits without a graceful `stop()`, whether a crash, a `SIGKILL`,
+or `main` returning while `run()` is on another thread, you lose no
+acknowledged work. The engine only commits contiguous completed work, so
 anything uncommitted is simply redelivered at least once on the next start. It
 is safe; it is only wasteful, because that work is done twice. A clean `stop()`
 avoids the rework and the duplicates; an abrupt exit trades them for speed.
@@ -264,7 +264,7 @@ That is why it drops cleanly into a `scratch` container image.
 
 ## Liveness
 
-If the poll loop or a handler wedges, nothing crashes: `run()` blocks
+If the poll loop or a handler stalls, nothing crashes: `run()` blocks
 indefinitely, because Go's deadlock detector is disarmed when the runtime is
 embedded this way. Build your own liveness check. The engine's per-message
 metrics are a natural heartbeat; the recommended pattern is a watchdog thread
@@ -272,18 +272,18 @@ that exits the process when metrics go quiet for some interval while you know
 lag is non-zero, letting your supervisor restart it.
 
 There is one built-in bail worth knowing. Sustained poll errors (as opposed to a
-silent wedge) are handled by the broker adapter: if polling fails continuously
-for ten minutes (the broker is unreachable, or authorisation was revoked), the
-adapter logs the errors throughout and then triggers the engine's emergency
-shutdown with a reason, on the reasoning that a supervised restart beats
-consuming nothing forever. The emergency shutdown behaves like any other: your
+silent stall) are handled by the broker adapter: if polling fails continuously
+for ten minutes, because the broker is unreachable or authorisation was
+revoked, the adapter logs the errors throughout and then triggers the engine's
+emergency shutdown with a reason, on the reasoning that a supervised restart
+beats consuming nothing forever. The emergency shutdown behaves like any other: your
 shutdown handler fires once with the reason, which takes the form `partition
-<topic>[<n>] failing to fetch for 10m0s: <underlying error>` (the logs carry a
+<topic>[<n>] failing to fetch for 10m0s: <underlying error>`; the logs contain a
 matching `stopping consumer after sustained poll failure: <same>` line just
-before), and a thread parked in `run()` returns. It does not exit the process for
+before, and a thread parked in `run()` returns. It does not exit the process for
 you; whether to exit is your decision,
 and in a supervised deployment exiting so the supervisor restarts you is the
-sensible response. The window defaults to ten minutes and is tunable with the
+sensible response. The window defaults to ten minutes and is configurable with the
 `poll_error_bail_after` option (range [1 minute, 1 hour], or `0` to disable the
 bail entirely), documented in `docs/kafka-options.md`. Treat a run of poll-error
 logs followed by your shutdown handler firing as
@@ -300,12 +300,12 @@ when it loads; setting them from Rust code after start has no effect.
 
 Handler concurrency is also a thread budget. Each handler occupies an
 operating-system thread for as long as its `process` call runs, so the
-`concurrent_keys` engine knob (default 250) bounds not just per-key concurrency
+`concurrent_keys` engine setting (default 250) bounds not just per-key concurrency
 but the number of OS threads a burst of slow handlers can pin. What matters is
 therefore the time each message spends in the handler: keep handlers short, and
 size `concurrent_keys` (documented in `docs/configuration.md`) for the
 per-message time and the OS-thread cost you can afford. Async I/O is welcome; the
-synchronous handler signature already steers you to the right shape, which is to
+synchronous handler signature already steers you to the right pattern, which is to
 drive the async work to completion inside the call (a tokio handle and
 `block_on`) rather than spawning and returning. Throughput here comes from
 raising `concurrent_keys`, not from a spawn inside a handler; the reasoning is the
@@ -328,6 +328,7 @@ Keep the default `unwind` profile for any build that runs this engine.
 | Handler panics | Same as `Err`, caught at the FFI boundary (requires `panic = "unwind"`) |
 | Dead-letter handler returns `Err` | Emergency shutdown: that offset is not committed, and the work is redelivered on restart |
 | Broker unreachable at `build()` | Clean error with the broker client's text; retryable |
+| Auth credentials unresolvable at `build()` | Clean startup error, resolved eagerly like the broker dial: the AWS provider chain or the OIDC token fetch failed (see `docs/security.md`) |
 | Poll errors for ten minutes straight | The adapter triggers an emergency shutdown: the shutdown handler fires with a reason and `run()` returns (exiting the process is then your decision; see Liveness) |
 | Invalid configuration | Clean error at `build()`; the engine's validation panics are recovered and reported as an error, not a crash |
 | Go runtime internal panic | Process death, total and immediate; a static-linked runtime owns the process's fate |

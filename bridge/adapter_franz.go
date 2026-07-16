@@ -20,15 +20,15 @@ func init() {
 }
 
 // The adapter refuses to wire a consumer that does not satisfy
-// nexus.EmergencyShutdowner (CreateConsumer rejects it), and its poll-error
-// escalation reaches the host through that contract. This pin turns any
+// nexus.EmergencyShutdowner, rejecting it in CreateConsumer, and its
+// poll-error escalation reaches the host through that contract. This pin turns any
 // engine downgrade below the contract into a build failure here, rather
 // than a runtime init error surfacing on every host.
 var _ nexus.EmergencyShutdowner = (*demux.Consumer[*kgo.Record])(nil)
 
 // Defaults the rebalance/drain guard reasons about. Keep in sync with the
 // upstream sources named in the comments; both are pinned by go.mod, so a
-// version bump is the moment to re-check.
+// version update is the moment to re-check.
 const (
 	// kgo's default rebalance timeout (franz-go pkg/kgo/config.go).
 	kgoDefaultRebalanceTimeout = 60 * time.Second
@@ -71,7 +71,7 @@ func checkRebalanceAboveDrain(cfg bridgeConfig) *bridgeError {
 	return nil
 }
 
-// buildFranzConsumer wires the pure-Go franz adapter (no librdkafka).
+// buildFranzConsumer wires the pure-Go franz adapter.
 func buildFranzConsumer(ctx context.Context, cfg bridgeConfig) (consumerHandle, func() error, *bridgeError) {
 	if berr := checkRebalanceAboveDrain(cfg); berr != nil {
 		return nil, nil, berr
@@ -82,16 +82,16 @@ func buildFranzConsumer(ctx context.Context, cfg bridgeConfig) (consumerHandle, 
 		return nil, nil, berr
 	}
 
-	// llingr.client.log.level is an ADAPTER option (the kgo-internals log
-	// bridge verbosity), not a kgo.Opt: consume it before the option table,
-	// which treats unknown keys as an init error.
+	// llingr.client.log.level is an ADAPTER option controlling the
+	// kgo-internals log bridge verbosity, not a kgo.Opt: consume it before
+	// the option table, which treats unknown keys as an init error.
 	clientLogLevel, berr := popClientLogLevel(cfg.KafkaConfig)
 	if berr != nil {
 		return nil, nil, berr
 	}
 
-	// The llingr.poll.error.* keys are likewise ADAPTER options (the
-	// poll-error resilience knobs), consumed before the option table.
+	// The llingr.poll.error.* keys are likewise ADAPTER options, the
+	// poll-error resilience settings, consumed before the option table.
 	pollErrorOpts, berr := popPollErrorOptions(cfg.KafkaConfig)
 	if berr != nil {
 		return nil, nil, berr
@@ -103,12 +103,12 @@ func buildFranzConsumer(ctx context.Context, cfg bridgeConfig) (consumerHandle, 
 	}
 
 	// OPINIONATED DEFAULT: fetch isolation is read_committed. kgo's own
-	// default is read_uncommitted (the wire-protocol default), but under
+	// default is read_uncommitted, the wire-protocol default, but under
 	// read_uncommitted aborted transactional records would be processed and
 	// their offsets committed downstream, which the engine's safety posture
-	// refuses. The bridge sets read_committed before user options (an
-	// explicit isolation.level=read_committed is accepted and redundant;
-	// read_uncommitted is rejected by the option table).
+	// refuses. The bridge sets read_committed before user options; an
+	// explicit isolation.level=read_committed is accepted and redundant,
+	// and read_uncommitted is rejected by the option table.
 	opts = append([]kgo.Opt{kgo.FetchIsolationLevel(kgo.ReadCommitted())}, opts...)
 
 	builder := newBridgeBuilder[*kgo.Record](ctx, cfg, bw,
@@ -177,7 +177,7 @@ func franzHeaders(hs []kgo.RecordHeader) []bridgeHeader {
 // SILENTLY (franzadapter clampBailAfter/clampBackoff); the bridge instead
 // rejects them loudly here, so a configured value never silently changes
 // meaning. Keep in sync with the adapter's clamp constants (pinned by
-// go.mod; a version bump is the moment to re-check).
+// go.mod; a version update is the moment to re-check).
 const (
 	minPollErrorBailAfter = time.Minute
 	maxPollErrorBailAfter = time.Hour

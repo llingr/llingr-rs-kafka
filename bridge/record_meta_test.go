@@ -36,8 +36,8 @@ func TestFranzMeta(t *testing.T) {
 	record := &kgo.Record{
 		Timestamp: ts,
 		// Zero-value Attrs reports TimestampType() == 0 (create time), the
-		// common case; the full kind mapping is pinned above (kgo does not
-		// expose an attrs setter to construct the other kinds).
+		// common case; the full kind mapping is pinned above, since kgo
+		// does not expose an attrs setter to construct the other kinds.
 		Headers: []kgo.RecordHeader{
 			{Key: "trace-id", Value: []byte("abc")},
 			{Key: "null-val", Value: nil},

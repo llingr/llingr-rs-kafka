@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 The llingr-rs-kafka Authors
 // SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Llingr-Commercial
 
-//! Raw FFI declarations for the C API exported by the Go bridge
-//! (`bridge/` in this repository, built as the static `libllingr.a`).
+//! Raw FFI declarations for the C API exported by the Go bridge in
+//! `bridge/`, built as the static `libllingr.a`.
 
 use std::os::raw::{c_char, c_int};
 
@@ -41,7 +41,7 @@ pub type ProcessFn = unsafe extern "C" fn(
     traits_out: *mut i64,
     // On a non-zero return, the callback writes up to err_cap bytes of its
     // error text into err_buf and stores the count in err_len_out. The bridge
-    // surfaces that as the dead-letter reason.
+    // reports that as the dead-letter reason.
     err_buf: *mut c_char,
     err_cap: c_int,
     err_len_out: *mut c_int,
@@ -143,9 +143,9 @@ extern "C" {
     pub fn llingr_stop();
     /// Trigger the engine's emergency shutdown: abandon in-flight work and
     /// stop now, no drain, no final commit. `reason` is NOT NUL-terminated;
-    /// `reason_len` bounds it (a NULL or zero-length reason gets a default
-    /// description). Delivered to the shutdown callback exactly once. Safe
-    /// in any lifecycle state; a no-op before [`llingr_init`].
+    /// `reason_len` bounds it, and a NULL or zero-length reason gets a
+    /// default description. Delivered to the shutdown callback exactly once.
+    /// Safe in any lifecycle state; a no-op before [`llingr_init`].
     pub fn llingr_emergency_stop(reason: *const c_char, reason_len: c_int);
     pub fn llingr_on_process(cb: ProcessFn);
     pub fn llingr_on_deadletter(cb: DeadLetterFn);
@@ -154,7 +154,7 @@ extern "C" {
     pub fn llingr_on_log(cb: LogFn);
     pub fn llingr_on_bandwidth(cb: BandwidthFn);
     /// Point-in-time engine state as a C-allocated, NUL-terminated JSON
-    /// string (the same document Go's SnapshotHandler serves), or NULL when
+    /// string, the same document Go's SnapshotHandler serves, or NULL when
     /// the engine is not initialised. The caller owns the string and must
     /// release it with [`llingr_free_string`].
     pub fn llingr_take_snapshot() -> *mut c_char;
@@ -163,10 +163,7 @@ extern "C" {
 
 /// FFI contract version the crate is built for. Must equal the `abiVersion`
 /// constant in the Go bridge (`bridge/main.go`); the engine builder checks it
-/// at startup. Bump both together on any ABI change.
-///
-/// v1 is the first released contract; the unpublished revisions that
-/// preceded it were renumbered away, so the released history starts here.
+/// at startup. Increment both together on any ABI change.
 pub const LLINGR_ABI_VERSION: c_int = 1;
 
 #[cfg(test)]
@@ -175,8 +172,8 @@ mod tests {
     use std::mem::{align_of, offset_of, size_of};
 
     /// The intended contract version, pinned locally. The engine module
-    /// separately asserts the LIBRARY reports this value; this test catches a
-    /// bump on only one side of a coordinated Rust/Go change.
+    /// separately asserts the LIBRARY reports this value; this test catches an
+    /// increment on only one side of a coordinated Rust/Go change.
     #[test]
     fn abi_version_is_v1() {
         assert_eq!(LLINGR_ABI_VERSION, 1);

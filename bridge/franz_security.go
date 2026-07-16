@@ -22,15 +22,11 @@ import (
 // how the credentials are used, and certificates arrive in location/PEM
 // pairs. Keys are therefore collected first, then validated and assembled as
 // one unit, so every inconsistency is a clear startup error and nothing is
-// ever silently ignored.
+// silently ignored.
 //
-// Capability boundaries (documented in the README security matrix):
-//   - PLAIN, SCRAM-SHA-256, SCRAM-SHA-512, TLS and mTLS: supported here.
-//   - ssl.key.password (encrypted client keys): unsupported; decrypt the key.
-//   - OAUTHBEARER and AWS_MSK_IAM: not supported yet (the auth phase adds
-//     both; see PLAN.md section 4.1).
-//   - GSSAPI/Kerberos: unsupported; the bridge does not wire franz-go's
-//     (pure Go) Kerberos mechanism.
+// Capability boundaries are the README security matrix. The cloud mechanisms
+// live in aws_iam.go, oauth_oidc.go, and gcp_iam.go; encrypted client keys
+// and GSSAPI/Kerberos are rejected with the errors below.
 type franzSecurity struct {
 	protocol      string // security.protocol (lowercased)
 	caLocation    string // ssl.ca.location
@@ -45,7 +41,25 @@ type franzSecurity struct {
 	mechanism     string // sasl.mechanism / sasl.mechanisms
 	username      string // sasl.username
 	password      string // sasl.password
-	sawKey        bool   // any security key was provided at all
+	// AWS_MSK_IAM: credentials resolve Go-side via the AWS provider chain in
+	// aws_iam.go; these keys only steer it.
+	awsRegion          string // aws.region
+	awsProfile         string // aws.profile
+	awsRoleARN         string // aws.role.arn
+	awsRoleSessionName string // aws.role.session.name
+	// OAUTHBEARER (OIDC client-credentials): the token endpoint and client
+	// credentials the bridge fetches tokens with (see oauth_oidc.go).
+	oauthTokenEndpoint string // sasl.oauthbearer.token.endpoint.url
+	oauthClientID      string // sasl.oauthbearer.client.id
+	oauthClientSecret  string // sasl.oauthbearer.client.secret
+	oauthScope         string // sasl.oauthbearer.scope
+	oauthExtensions    string // sasl.oauthbearer.extensions ("k1=v1,k2=v2")
+	oauthMethod        string // sasl.oauthbearer.method ("oidc" or "gcp")
+	// GCP IAM (OAUTHBEARER method=gcp): Application Default Credentials
+	// steering (see gcp_iam.go).
+	gcpPrincipal       string // gcp.principal (the token's sub claim)
+	gcpCredentialsFile string // gcp.credentials.file (explicit SA key JSON)
+	sawKey             bool   // any security key was provided
 }
 
 // franzSecurityCollectors recognises the security keys and stores their values.
@@ -65,10 +79,22 @@ var franzSecurityCollectors = map[string]func(*franzSecurity, string){
 	"sasl.mechanisms":                       func(s *franzSecurity, v string) { s.mechanism = v },
 	"sasl.username":                         func(s *franzSecurity, v string) { s.username = v },
 	"sasl.password":                         func(s *franzSecurity, v string) { s.password = v },
+	"aws.region":                            func(s *franzSecurity, v string) { s.awsRegion = strings.TrimSpace(v) },
+	"aws.profile":                           func(s *franzSecurity, v string) { s.awsProfile = strings.TrimSpace(v) },
+	"aws.role.arn":                          func(s *franzSecurity, v string) { s.awsRoleARN = strings.TrimSpace(v) },
+	"aws.role.session.name":                 func(s *franzSecurity, v string) { s.awsRoleSessionName = strings.TrimSpace(v) },
+	"sasl.oauthbearer.token.endpoint.url":   func(s *franzSecurity, v string) { s.oauthTokenEndpoint = strings.TrimSpace(v) },
+	"sasl.oauthbearer.client.id":            func(s *franzSecurity, v string) { s.oauthClientID = v },
+	"sasl.oauthbearer.client.secret":        func(s *franzSecurity, v string) { s.oauthClientSecret = v },
+	"sasl.oauthbearer.scope":                func(s *franzSecurity, v string) { s.oauthScope = strings.TrimSpace(v) },
+	"sasl.oauthbearer.extensions":           func(s *franzSecurity, v string) { s.oauthExtensions = v },
+	"sasl.oauthbearer.method":               func(s *franzSecurity, v string) { s.oauthMethod = strings.ToLower(strings.TrimSpace(v)) },
+	"gcp.principal":                         func(s *franzSecurity, v string) { s.gcpPrincipal = strings.TrimSpace(v) },
+	"gcp.credentials.file":                  func(s *franzSecurity, v string) { s.gcpCredentialsFile = strings.TrimSpace(v) },
 }
 
 // collect stores a recognised security key. Returns false when the key is not
-// a security key (the caller then tries the independent option table).
+// a security key; the caller then tries the independent option table.
 func (s *franzSecurity) collect(key, value string) bool {
 	collector, ok := franzSecurityCollectors[key]
 	if !ok {
@@ -87,7 +113,30 @@ func (s *franzSecurity) hasSSLKeys() bool {
 }
 
 func (s *franzSecurity) hasSASLKeys() bool {
-	return s.mechanism != "" || s.username != "" || s.password != ""
+	return s.mechanism != "" || s.username != "" || s.password != "" ||
+		s.hasAWSKeys() || s.hasOAuthKeys() || s.hasGCPKeys()
+}
+
+// hasGCPKeys reports whether any gcp.* steering key was provided. Like the
+// aws.* family, these are SASL-family keys configuring the OAUTHBEARER gcp
+// method, gating the same protocol conflict checks.
+func (s *franzSecurity) hasGCPKeys() bool {
+	return s.gcpPrincipal != "" || s.gcpCredentialsFile != ""
+}
+
+// hasAWSKeys reports whether any aws.* steering key was provided. These are
+// SASL-family keys configuring AWS_MSK_IAM, so they gate the same protocol
+// conflict checks as sasl.username/password.
+func (s *franzSecurity) hasAWSKeys() bool {
+	return s.awsRegion != "" || s.awsProfile != "" ||
+		s.awsRoleARN != "" || s.awsRoleSessionName != ""
+}
+
+// hasOAuthKeys reports whether any sasl.oauthbearer.* key was provided.
+func (s *franzSecurity) hasOAuthKeys() bool {
+	return s.oauthTokenEndpoint != "" || s.oauthClientID != "" ||
+		s.oauthClientSecret != "" || s.oauthScope != "" ||
+		s.oauthExtensions != "" || s.oauthMethod != ""
 }
 
 // build validates the collected keys and assembles the franz-go security
@@ -151,7 +200,7 @@ func (s *franzSecurity) build() ([]kgo.Opt, *bridgeError) {
 // librdkafka's semantics:
 //   - ssl.ca.location / ssl.ca.pem  -> RootCAs (absent: system roots)
 //   - certificate+key pairs         -> client certificate (mTLS)
-//   - enable.ssl.certificate.verification=false -> no verification at all
+//   - enable.ssl.certificate.verification=false -> no verification
 //   - ssl.endpoint.identification.algorithm=none -> chain verified against the
 //     roots, hostname NOT checked (Go bundles hostname checking into standard
 //     verification, so this is a custom VerifyConnection)
@@ -261,36 +310,68 @@ func (s *franzSecurity) tlsConfig() (*tls.Config, *bridgeError) {
 }
 
 // saslMechanism assembles the franz-go SASL mechanism from the sasl.* keys.
+// PLAIN and SCRAM take a username/password pair; AWS_MSK_IAM and OAUTHBEARER
+// take none, their credentials resolving Go-side in aws_iam.go and
+// oauth_oidc.go. The per-mechanism key families are cross-checked here so a
+// key belonging to a different mechanism than the one selected is a clear
+// error, never silently ignored.
 func (s *franzSecurity) saslMechanism() (sasl.Mechanism, *bridgeError) {
 	mechanism := strings.ToUpper(strings.TrimSpace(s.mechanism))
 	if mechanism == "" {
 		return nil, bridgeErrorf(errBadOption,
 			"sasl.mechanism is required with security.protocol=%s", s.protocol)
 	}
-	if s.username == "" {
-		return nil, bridgeErrorf(errBadOption, "sasl.username is required with sasl.mechanism=%s", mechanism)
+
+	// Orphaned mechanism-family keys: aws.* only apply to AWS_MSK_IAM,
+	// sasl.oauthbearer.* only to OAUTHBEARER. Reject a mismatch rather than
+	// silently dropping the key.
+	if s.hasAWSKeys() && mechanism != "AWS_MSK_IAM" {
+		return nil, bridgeErrorf(errBadOption,
+			"aws.* options apply only to sasl.mechanism=AWS_MSK_IAM (got %s)", mechanism)
 	}
-	if s.password == "" {
-		return nil, bridgeErrorf(errBadOption, "sasl.password is required with sasl.mechanism=%s", mechanism)
+	if s.hasOAuthKeys() && mechanism != "OAUTHBEARER" {
+		return nil, bridgeErrorf(errBadOption,
+			"sasl.oauthbearer.* options apply only to sasl.mechanism=OAUTHBEARER (got %s)", mechanism)
+	}
+	if s.hasGCPKeys() && !(mechanism == "OAUTHBEARER" && s.oauthMethod == "gcp") {
+		return nil, bridgeErrorf(errBadOption,
+			"gcp.* options apply only to sasl.mechanism=OAUTHBEARER with sasl.oauthbearer.method=gcp")
 	}
 
 	switch mechanism {
-	case "PLAIN":
-		return plain.Auth{User: s.username, Pass: s.password}.AsMechanism(), nil
-	case "SCRAM-SHA-256":
-		return scram.Auth{User: s.username, Pass: s.password}.AsSha256Mechanism(), nil
-	case "SCRAM-SHA-512":
-		return scram.Auth{User: s.username, Pass: s.password}.AsSha512Mechanism(), nil
+	case "PLAIN", "SCRAM-SHA-256", "SCRAM-SHA-512":
+		if s.username == "" {
+			return nil, bridgeErrorf(errBadOption, "sasl.username is required with sasl.mechanism=%s", mechanism)
+		}
+		if s.password == "" {
+			return nil, bridgeErrorf(errBadOption, "sasl.password is required with sasl.mechanism=%s", mechanism)
+		}
+		switch mechanism {
+		case "PLAIN":
+			return plain.Auth{User: s.username, Pass: s.password}.AsMechanism(), nil
+		case "SCRAM-SHA-256":
+			return scram.Auth{User: s.username, Pass: s.password}.AsSha256Mechanism(), nil
+		default:
+			return scram.Auth{User: s.username, Pass: s.password}.AsSha512Mechanism(), nil
+		}
+	case "AWS_MSK_IAM":
+		return awsIAMMechanism(s)
 	case "OAUTHBEARER":
-		return nil, bridgeErrorf(errBadOption,
-			"OAUTHBEARER is not supported yet")
+		// The method selects the token SOURCE; the wire mechanism is the
+		// same. "gcp" is Application Default Credentials for Google Cloud
+		// Managed Service for Apache Kafka; "" or "oidc" is the OIDC
+		// client-credentials fetcher, which rejects any other method.
+		if s.oauthMethod == "gcp" {
+			return gcpIAMMechanism(s)
+		}
+		return oauthOIDCMechanism(s)
 	case "GSSAPI":
 		return nil, bridgeErrorf(errBadOption,
 			"GSSAPI/Kerberos is not supported: this bridge does not wire franz-go's Kerberos "+
 				"mechanism; it requires a custom engine build")
 	default:
 		return nil, bridgeErrorf(errBadOption,
-			"unsupported sasl.mechanism %q (supported: PLAIN, "+
-				"SCRAM-SHA-256, SCRAM-SHA-512)", mechanism)
+			"unsupported sasl.mechanism %q (supported: PLAIN, SCRAM-SHA-256, SCRAM-SHA-512, "+
+				"AWS_MSK_IAM, OAUTHBEARER)", mechanism)
 	}
 }
