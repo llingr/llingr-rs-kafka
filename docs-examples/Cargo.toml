@@ -1,0 +1,34 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 The llingr-rs-kafka Authors
+# SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Llingr-Commercial
+
+# Its own workspace so it is fully isolated from the root crate's build: the
+# main `cargo build`/CI never compiles this, only `make docs-check` (and the
+# docs-check CI job) do. Not published; excluded from the llingr-kafka package.
+[workspace]
+
+[package]
+name = "docs-examples"
+version = "0.0.0"
+edition = "2021"
+publish = false
+license = "AGPL-3.0-only OR LicenseRef-Llingr-Commercial"
+
+[dependencies]
+# The crate under documentation: the samples call its real API by `path`, so a
+# sample that drifts from the API stops compiling.
+llingr-kafka = { path = ".." }
+# Crates the doc samples reference by path (env_logger::init(),
+# tracing_log::LogTracer, tracing_subscriber::fmt, signal_hook::...). Add more
+# here if a new sample references another crate; a framework-heavy sample
+# (for example an axum metrics endpoint) should instead be tagged
+# ```rust,ignore``` so it is not compile-checked here.
+env_logger = "0.11"
+log = "0.4"
+signal-hook = "0.3"
+tracing-log = "0.2"
+tracing-subscriber = "0.3"
+# For the processing.md async sample only (a Runtime built in main, a stored
+# Handle, Handle::block_on inside process()): rt + rt-multi-thread cover that
+# shape, no macros. This is a docs-examples harness dependency ONLY; the crate
+# itself pulls in no async runtime.
+tokio = { version = "1", features = ["rt", "rt-multi-thread"] }

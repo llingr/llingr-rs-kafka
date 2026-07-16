@@ -1,0 +1,44 @@
+# cargo-deny configuration for llingr-kafka.
+#
+# Scope note: cargo-deny sees only the Rust crate graph. The Go engine linked
+# statically into this crate embeds its own dependencies (franz-go and its
+# submodules, klauspost/compress, pierrec/lz4, golang.org/x/crypto); those are
+# invisible here and are attributed in THIRD-PARTY-NOTICES instead, and pinned
+# by bridge/go.sum. This file governs the Rust side only.
+
+[advisories]
+version = 2
+# RustSec advisory database (fetched fresh at scan time). Any active advisory
+# fails the check; yanked crates fail too. No standing ignores.
+yanked = "deny"
+ignore = []
+
+[licenses]
+version = 2
+# Allow-list for the whole Rust crate graph: the permissive licences of the
+# Rust dependencies (log, serde, prometheus-client, tiny_http, signal-hook and
+# their transitive deps), plus this crate's own dual expression. The crate
+# manifest carries the plain "AGPL-3.0-only" identifier (crates.io/cargo reject
+# LicenseRef- in the license field); the commercial option travels in LICENSE
+# and REUSE.toml, so LicenseRef-Llingr-Commercial is allowed here too.
+allow = [
+    "Apache-2.0",
+    "MIT",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-3.0",
+    "Unicode-DFS-2016",
+    "AGPL-3.0-only",
+    "LicenseRef-Llingr-Commercial",
+]
+confidence-threshold = 0.9
+
+[bans]
+# Duplicate transitive versions are a warning, not a failure; an unpinned
+# wildcard dependency is a hard failure.
+multiple-versions = "warn"
+wildcards = "deny"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"

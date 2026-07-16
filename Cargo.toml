@@ -1,0 +1,61 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 The llingr-rs-kafka Authors
+# SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Llingr-Commercial
+
+[package]
+name = "llingr-kafka"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.78"
+description = "The llingr concurrent message processing engine with a Kafka broker, batteries included"
+license = "AGPL-3.0-only OR LicenseRef-Llingr-Commercial"
+repository = "https://github.com/llingr/llingr-rs-kafka"
+homepage = "https://llingr.io"
+readme = "README.md"
+keywords = ["kafka", "message-processing", "concurrent", "streaming", "redpanda"]
+categories = ["api-bindings", "concurrency", "network-programming"]
+# The Go engine links as a native static library named `llingr`; `links`
+# declares that so cargo refuses two crates claiming the same native library
+# in one dependency graph (one engine instance per process is a hard rule).
+links = "llingr"
+# The published package carries sources + bridge/ + LICENSE/NOTICES only.
+exclude = [
+    "Makefile",
+    "dist/",
+    "example/",
+    ".github/",
+    "abi-check/",
+    "docker/",
+    "docs/",
+    "deny.toml",
+    ".fossa.yml",
+    "REUSE.toml",
+    "LICENSES/",
+    "gen-third-party-notices.sh",
+    "CODE_OF_CONDUCT.md",
+    "CONTRIBUTING.md",
+    "SECURITY.md",
+    ".gitignore",
+]
+
+# Pre-baked means pre-baked: no cargo features, every capability always
+# compiled in, activation is runtime configuration.
+[dependencies]
+# The stable, permissively licensed contract layer shared by every llingr
+# crate: Message, Traits, the handler traits. Published on crates.io.
+llingr-nexus = "0.10.0"
+# Engine log lines route to the process-global `log` facade, target "llingr".
+log = "0.4"
+# Baked-in Prometheus metrics, activated at runtime via Metrics::serve /
+# Metrics::registry.
+prometheus-client = "0.22"
+# The built-in scrape endpoint (Metrics::serve): small, synchronous, no async
+# runtime. Dormant unless activated.
+tiny_http = "0.12"
+# Snapshot document types and config JSON.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+# Used by the documented shutdown pattern in examples/doctests: a signal
+# handler sets an atomic flag, a normal thread calls stop().
+signal-hook = "0.3"

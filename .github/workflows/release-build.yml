@@ -1,0 +1,120 @@
+name: Release build
+
+# Trusted builder (SLSA Build L3 pattern): builds the release assets and
+# signs the attestations. Runs only via workflow_call from release.yml.
+# Holds signing permissions but NO contents:write; the caller's publish
+# job is the inverse. Verify with:
+#   gh attestation verify <asset> --repo llingr/llingr-rs-kafka \
+#     --signer-workflow llingr/llingr-rs-kafka/.github/workflows/release-build.yml
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build & attest
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      # cargo package runs a verification build, and this crate's build.rs
+      # compiles the Go engine bridge (go build -buildmode=c-archive) via cgo,
+      # so Go must be on PATH; the runner already provides a C compiler.
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version: '1.25'
+
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master 2026-07-15
+        with:
+          toolchain: stable
+
+      - name: Check crate version matches tag
+        run: |
+          # pkgid yields "...#name@x.y.z" (or "...#x.y.z" when the package
+          # and directory names match); the trailing cut handles both.
+          crate_version=$(cargo pkgid | cut -d'#' -f2 | cut -d'@' -f2)
+          test "v${crate_version}" = "${GITHUB_REF_NAME}" || {
+            echo "crate version ${crate_version} does not match tag ${GITHUB_REF_NAME}"
+            exit 1
+          }
+
+      # The .crate file is byte-identical to what `cargo publish` uploads,
+      # so the attestation below covers the artifact crates.io users get.
+      # Packaged before anything writes to the working directory: cargo
+      # refuses to package a tree it considers dirty, and the steps below
+      # drop their outputs at the repository root.
+      - name: Package crate
+        run: |
+          cargo package --locked
+          cp target/package/llingr-kafka-*.crate .
+
+      - name: Source archive
+        run: >
+          git archive --format=tar.gz
+          --prefix="llingr-rs-kafka-${GITHUB_REF_NAME}/"
+          -o "llingr-rs-kafka-${GITHUB_REF_NAME}.tar.gz"
+          "${GITHUB_REF_NAME}"
+
+      - name: Install syft
+        uses: anchore/sbom-action/download-syft@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+
+      # syft reads Cargo.lock natively and emits both SBOM formats. Note: this
+      # SBOM covers the Rust crate graph only; the Go modules linked statically
+      # into user binaries are recorded separately in THIRD-PARTY-NOTICES.
+      - name: Generate CycloneDX SBOM (syft)
+        run: >
+          syft dir:.
+          --exclude './.github/**'
+          --source-name llingr-rs-kafka
+          --source-version "${GITHUB_REF_NAME}"
+          --source-supplier "Llingr Software Ltd"
+          -o "cyclonedx-json=llingr-rs-kafka-${GITHUB_REF_NAME}.cdx.json"
+
+      - name: Generate SPDX SBOM (syft)
+        run: >
+          syft dir:.
+          --exclude './.github/**'
+          --source-name llingr-rs-kafka
+          --source-version "${GITHUB_REF_NAME}"
+          --source-supplier "Llingr Software Ltd"
+          -o "spdx-json=llingr-rs-kafka-${GITHUB_REF_NAME}.spdx.json"
+
+      - name: Attest build provenance
+        id: attest
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-path: |
+            llingr-rs-kafka-${{ github.ref_name }}.tar.gz
+            llingr-kafka-*.crate
+
+      # Ship the provenance bundle as a release asset too. The attestation
+      # already lives in GitHub's store (gh attestation verify); attaching it
+      # makes the provenance discoverable and verifiable next to the tarball.
+      - name: Attach provenance bundle
+        run: cp "${{ steps.attest.outputs.bundle-path }}" "llingr-rs-kafka-${GITHUB_REF_NAME}.tar.gz.sigstore"
+
+      - name: Attest SBOM
+        uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
+        with:
+          subject-path: llingr-rs-kafka-${{ github.ref_name }}.tar.gz
+          sbom-path: llingr-rs-kafka-${{ github.ref_name }}.cdx.json
+
+      - name: Upload release assets
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-assets
+          path: |
+            llingr-rs-kafka-${{ github.ref_name }}.*
+            llingr-kafka-*.crate
+          if-no-files-found: error
+          retention-days: 1

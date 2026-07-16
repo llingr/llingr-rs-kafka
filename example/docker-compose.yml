@@ -1,0 +1,79 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 The llingr-rs-kafka Authors
+# SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Llingr-Commercial
+#
+# The end-to-end proof, as a single compose stack on one network. The consumer's
+# exit code is the verdict: 0 means the whole demux + franz + FFI + log + metrics
+# chain worked against a real broker. `make example-verify` brings the stack up
+# detached (up -d), blocks on `docker wait` for the consumer container, prints the
+# logs, then tears down with `down -v`, preserving the consumer's exit code. It
+# deliberately does NOT use `--exit-code-from consumer`: that implies
+# `--abort-on-container-exit`, which tears the whole stack down the instant the
+# one-shot topic-init exits, killing redpanda before the consumer can connect.
+#
+# Flow: redpanda comes up and reports healthy; topic-init creates the orders
+# topic with 12 partitions and exits; the producer publishes 1000 order events
+# and exits; the consumer processes them, asserting the key == body.orderId
+# invariant per message, and exits 0 once it has seen all 1000.
+
+name: llingr-kafka-example
+
+services:
+  redpanda:
+    image: docker.redpanda.com/redpandadata/redpanda:v24.2.7
+    command:
+      - redpanda
+      - start
+      - --smp=1
+      - --overprovisioned
+      - --node-id=0
+      - --check=false
+      - --kafka-addr=PLAINTEXT://0.0.0.0:9092
+      - --advertise-kafka-addr=PLAINTEXT://redpanda:9092
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster health | grep -q 'Healthy:.*true'"]
+      interval: 3s
+      timeout: 5s
+      retries: 30
+
+  # One-shot: create the orders topic with 12 partitions, then exit. Twelve
+  # partitions so per-key routing and out-of-order completion are genuinely
+  # exercised. Runs in its own container, so rpk is pointed at the broker.
+  topic-init:
+    image: docker.redpanda.com/redpandadata/redpanda:v24.2.7
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    entrypoint: ["rpk"]
+    command: ["topic", "create", "orders", "-p", "12", "-X", "brokers=redpanda:9092"]
+    restart: "no"
+
+  producer:
+    build:
+      context: .
+      dockerfile: Dockerfile.producer
+    depends_on:
+      topic-init:
+        condition: service_completed_successfully
+    environment:
+      BROKERS: redpanda:9092
+      TOPIC: orders
+      PARTITIONS: "12"
+      COUNT: "1000"
+      RUST_LOG: info
+
+  # Starts alongside the producer: AutoOffsetReset::Earliest makes ordering
+  # between them moot. Port 9464 is published so /metrics can be curled mid-run.
+  consumer:
+    build:
+      context: ..
+      dockerfile: example/Dockerfile.consumer
+    depends_on:
+      topic-init:
+        condition: service_completed_successfully
+    environment:
+      BROKERS: redpanda:9092
+      TOPIC: orders
+      EXPECTED: "1000"
+      RUST_LOG: info
+    ports:
+      - "9464:9464"

@@ -1,0 +1,8 @@
+# The example consumer image builds from the REPO ROOT as its context (its
+# Dockerfile must reach Cargo.toml, build.rs, src/ and bridge/). Keep build
+# artifacts and version-control metadata out of that context; do NOT exclude
+# example/, whose sources the consumer needs.
+.git/
+target/
+**/target/
+dist/

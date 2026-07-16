@@ -1,0 +1,81 @@
+name: Pipeline
+# Distinguish push vs PR runs at a glance in the Actions list.
+run-name: "Pipeline (${{ github.event_name == 'pull_request' && format('PR #{0}', github.event.pull_request.number) || format('push {0}', github.ref_name) }})"
+
+# Single entry point for CI. Each check still lives in its own reusable
+# workflow file (lint.yml, ci.yml, ...); calling them from here collapses the
+# many-rows-per-commit into one. Cheap checks run on every branch push for
+# fast inner-loop feedback; the expensive suite (tests, CodeQL) runs only on a
+# PR, held behind those cheap checks so a cheap failure skips the heavy work.
+
+on:
+  # Every branch push (not tags: those fall through to release.yml).
+  push:
+    branches: ['**']
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Every job is gated on repository visibility: while the repository is PRIVATE,
+  # GitHub-hosted runner minutes are billed, so the whole pipeline is skipped to
+  # avoid paid minutes. It lights up automatically the moment the repository goes
+  # public: nothing to flip. `github.event.repository.private` is present on both
+  # push and pull_request payloads, which are this workflow's only triggers.
+  #
+  # Fast checks: run on every push, and again on a PR where they gate the heavy
+  # suite. Quick signal without paying for tests/CodeQL.
+  lint:
+    name: Lint
+    if: ${{ !github.event.repository.private }}
+    uses: ./.github/workflows/lint.yml
+
+  reuse:
+    name: REUSE
+    if: ${{ !github.event.repository.private }}
+    uses: ./.github/workflows/reuse.yml
+
+  vulncheck:
+    name: Vulncheck
+    if: ${{ !github.event.repository.private }}
+    uses: ./.github/workflows/vulncheck.yml
+
+  # Expensive checks: PR only (and private-gated), held behind the fast checks so
+  # a lint, licensing, or vuln failure short-circuits before tests or CodeQL spin
+  # up.
+  ci:
+    name: CI
+    if: ${{ github.event_name == 'pull_request' && !github.event.repository.private }}
+    needs: [lint, reuse, vulncheck]
+    uses: ./.github/workflows/ci.yml
+
+  coverage:
+    name: Coverage
+    if: ${{ github.event_name == 'pull_request' && !github.event.repository.private }}
+    needs: [lint, reuse, vulncheck]
+    uses: ./.github/workflows/coverage.yml
+
+  codeql:
+    name: CodeQL
+    if: ${{ github.event_name == 'pull_request' && !github.event.repository.private }}
+    needs: [lint, reuse, vulncheck]
+    uses: ./.github/workflows/codeql.yml
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+
+  # Compile-check every fenced `rust` sample in README.md and docs/*.md
+  # (docs-check.yml runs `cargo test --doc` over the docs-examples mirror, with
+  # no_run forced so the samples compile but never execute). Enabled now that the
+  # engine module has landed and the samples compile against the real API.
+  docs:
+    name: Docs
+    if: ${{ github.event_name == 'pull_request' && !github.event.repository.private }}
+    needs: [lint, reuse, vulncheck]
+    uses: ./.github/workflows/docs-check.yml

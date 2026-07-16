@@ -1,0 +1,26 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 The llingr-rs-kafka Authors
+# SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Llingr-Commercial
+#
+# A dev-only crate, never shipped, that proves the hand-written Rust FFI
+# declarations in src/ffi.rs match the C contract the Go bridge actually
+# exports. bindgen regenerates the contract from the cgo-emitted libllingr.h
+# (built by `make engine` into dist/<triple>/); the checks in src/lib.rs fail
+# COMPILATION on any divergence. `cargo build` here IS the test.
+#
+# Requires libclang (bindgen). Present in the builder image; locally,
+# Xcode CLT (macOS) or libclang-dev (Linux) provides it.
+
+[package]
+name = "llingr-abi-check"
+version = "0.0.0"
+edition = "2021"
+publish = false
+license = "AGPL-3.0-only OR LicenseRef-Llingr-Commercial"
+description = "Compile-time check that the Rust FFI declarations match the Go bridge's C contract"
+
+# Standalone: deliberately NOT part of any workspace, so ordinary builds of
+# the crate never require libclang.
+[workspace]
+
+[build-dependencies]
+bindgen = "0.72"

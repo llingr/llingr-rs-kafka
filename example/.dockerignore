@@ -1,0 +1,6 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 The llingr-rs-kafka Authors
+# SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Llingr-Commercial
+#
+# Applies to the producer image build (context: the example directory). Keeps
+# build artifacts out of the context so it stays small and reproducible.
+**/target

@@ -1,0 +1,35 @@
+name: Docs examples
+
+# Compiles (does not run) every fenced `rust` sample in README.md and docs/*.md.
+# docs-examples/ mirrors those samples as no_run doctests, so `cargo test --doc`
+# there compiles them without executing (the samples call the blocking
+# engine.run()). Reusable and currently dormant: it runs only when the Pipeline
+# orchestrator calls it, and that call is left disabled until the engine module
+# lands (see .github/workflows/pipeline.yml).
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  docs-examples:
+    name: doc samples compile
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      # docs-examples depends on llingr-kafka, whose build.rs compiles the Go
+      # engine bridge via cgo; the runner already provides a C compiler.
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version: '1.25'
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master 2026-07-15
+        with:
+          toolchain: stable
+      # no_run is forced per sample by docs-examples/build.rs, so this compiles
+      # every sample and runs none. Same command as `make docs-check`.
+      - run: cargo test --doc
+        working-directory: docs-examples

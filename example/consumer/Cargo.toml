@@ -1,0 +1,29 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 The llingr-rs-kafka Authors
+# SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Llingr-Commercial
+#
+# The example consumer: a llingr-kafka consumer that processes the producer's
+# order events. It depends on the crate by path (the repository root), so it
+# compiles only once that crate exists; that is expected during bring-up.
+
+[package]
+name = "consumer"
+version = "0.1.0"
+edition = "2021"
+publish = false
+license = "AGPL-3.0-only OR LicenseRef-Llingr-Commercial"
+
+[dependencies]
+# The crate under test, by path. A real application would depend on the
+# published crate instead: llingr-kafka = "x.y".
+llingr-kafka = { path = "../.." }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# env_logger is the whole logging story: installing it in two lines is the
+# demonstration that engine log lines flow through the `log` facade with no
+# other wiring (the crate emits them under target "llingr").
+log = "0.4"
+env_logger = "0.11"
+
+[[bin]]
+name = "consumer"
+path = "src/main.rs"

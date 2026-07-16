@@ -1,0 +1,94 @@
+name: Coverage
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+# Regression gate thresholds, checked LOCALLY in-job (not via codecov's cloud
+# status), so a drop fails the run deterministically. cargo-llvm-cov enforces
+# the Rust line floor with --fail-under-lines; the go-bridge job parses
+# `go tool cover` and compares.
+#
+# Set from the coverage achieved once the Tier 1+2 test-hardening landed
+# (measured: rust 94.36% lines, go-bridge 76.9% statements), with a few points of
+# headroom so ordinary churn does not flake the gate. These are a REGRESSION
+# FLOOR, not a ratchet to the exact figure: raise them deliberately if coverage
+# climbs and you want to lock the gain in.
+env:
+  RUST_MIN_LINES: '92'
+  GO_BRIDGE_MIN_LINES: '74'
+
+jobs:
+  rust:
+    name: rust coverage (src/*)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      # The crate's tests build the Go engine bridge via build.rs (cgo); the
+      # runner already provides a C compiler.
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version: '1.25'
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master 2026-07-15
+        with:
+          toolchain: stable
+          components: llvm-tools-preview
+      # Installer action digest-pinned; cargo-llvm-cov pinned to the validated
+      # version so a tool change cannot move the numbers under the gate.
+      - uses: taiki-e/install-action@43aecc8d72668fbcfe75c31400bc4f890f1c5853 # v2.83.2
+        with:
+          tool: cargo-llvm-cov@0.8.7
+      # One instrumented run: writes lcov and enforces the line floor. build.rs
+      # is excluded (it is a build script, not exercised by the test binaries);
+      # the crate's dependencies and the separate example/, docs-examples/ and
+      # abi-check/ packages are not measured.
+      - name: Coverage (lcov + gate)
+        run: >
+          cargo llvm-cov --locked
+          --ignore-filename-regex 'build\.rs'
+          --lcov --output-path coverage-rust.lcov
+          --fail-under-lines ${{ env.RUST_MIN_LINES }}
+      - name: Summary
+        run: cargo llvm-cov report --ignore-filename-regex 'build\.rs' --summary-only
+      - uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
+        with:
+          files: coverage-rust.lcov
+          flags: rust
+          fail_ci_if_error: false
+
+  go-bridge:
+    name: go-bridge coverage (bridge/*)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version: '1.25'
+      # -coverpkg=./... keeps this to the bridge module's own packages; the
+      # upstream engine modules are separate modules, measured in their own
+      # repos. -race matches the Go house pattern (implies covermode=atomic).
+      - name: Coverage
+        working-directory: bridge
+        run: go test -race -coverpkg=./... -coverprofile=coverage-bridge.out ./...
+      - name: Summary + gate
+        working-directory: bridge
+        run: |
+          go tool cover -func=coverage-bridge.out | tail -1
+          total=$(go tool cover -func=coverage-bridge.out | awk '/^total:/ { gsub(/%/, "", $3); print $3 }')
+          awk -v t="$total" -v m="${GO_BRIDGE_MIN_LINES}" 'BEGIN {
+            if (t + 0 < m + 0) { printf "go-bridge coverage %.1f%% is below the %.1f%% gate\n", t, m; exit 1 }
+            printf "go-bridge coverage %.1f%% meets the %.1f%% gate\n", t, m
+          }'
+      - uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
+        with:
+          files: bridge/coverage-bridge.out
+          flags: go-bridge
+          fail_ci_if_error: false

@@ -1,0 +1,62 @@
+# syntax=docker/dockerfile:1
+# SPDX-FileCopyrightText: Copyright (c) 2026 The llingr-rs-kafka Authors
+# SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Llingr-Commercial
+#
+# The example consumer as a fully static binary on `scratch`. The crate's
+# build.rs compiles the Go engine (franz adapter, pure-Go netgo DNS) into a
+# static c-archive during `cargo build`, so this single build stage needs both
+# toolchains: the Go image, plus rustup for the Rust side. Because it builds the
+# whole crate including the bridge, `make example-verify` also exercises the
+# Docker build path on every run.
+#
+# Static glibc (crt-static), not musl: the consumer links the Go engine, and the
+# Go runtime cannot bootstrap as a static guest library on musl (an unresolved
+# upstream blocker; see the crate's musl documentation). Static glibc's usual
+# DNS caveat does not bite here because the engine resolves brokers with pure-Go
+# netgo, not libc NSS.
+#
+# Build context is the repository root so the crate sources (Cargo.toml,
+# build.rs, src/, bridge/) and the example workspace are both in scope. This
+# image builds only once the crate exists; that is expected during bring-up.
+
+FROM golang:1.25-bookworm AS build
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+      | sh -s -- -y --default-toolchain stable --profile minimal
+ENV PATH=/root/.cargo/bin:$PATH
+
+WORKDIR /build
+# The crate under test (repository root): manifest, build script, sources, and
+# the Go bridge the build script compiles.
+COPY Cargo.toml build.rs ./
+COPY src/ ./src/
+COPY bridge/ ./bridge/
+# The example workspace. The consumer is built from here; the producer member
+# is only resolved (its manifest read), never compiled.
+COPY example/ ./example/
+
+WORKDIR /build/example
+# Static CRT (+crt-static) so the binary has no dynamic loader and runs on
+# scratch. It MUST be scoped to the target triple, not global: a global
+# RUSTFLAGS would apply +crt-static to proc-macro dependencies too (the crate
+# pulls prometheus-client's derive and serde_derive), and a proc-macro cannot
+# be built static. Setting CARGO_TARGET_<triple>_RUSTFLAGS and passing an
+# explicit --target makes cargo build proc-macros and build scripts for the
+# host without the flag, and applies +crt-static only to the final binary.
+# TARGETARCH (BuildKit) selects the glibc triple; the Go engine cannot run as a
+# static guest on musl, so this is always -gnu, never -musl.
+ARG TARGETARCH
+RUN set -eux; \
+    case "$TARGETARCH" in \
+      amd64) triple=x86_64-unknown-linux-gnu;  flagvar=CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS ;; \
+      arm64) triple=aarch64-unknown-linux-gnu; flagvar=CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS ;; \
+      *) echo "unsupported TARGETARCH: $TARGETARCH" >&2; exit 1 ;; \
+    esac; \
+    rustup target add "$triple"; \
+    export "$flagvar=-C target-feature=+crt-static"; \
+    cargo build -p consumer --release --target "$triple"; \
+    cp "target/$triple/release/consumer" /consumer; \
+    (readelf -l /consumer | grep -i interp || echo "no INTERP segment => fully static")
+
+FROM scratch AS runtime
+COPY --from=build /consumer /consumer
+ENTRYPOINT ["/consumer"]

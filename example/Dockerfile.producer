@@ -1,0 +1,44 @@
+# syntax=docker/dockerfile:1
+# SPDX-FileCopyrightText: Copyright (c) 2026 The llingr-rs-kafka Authors
+# SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Llingr-Commercial
+#
+# The example producer as a fully static binary on `scratch`: nothing in the
+# image but the binary. Pure Rust on rskafka, so there is no C toolchain,
+# librdkafka, or cmake anywhere in this build.
+#
+# The target is musl, not glibc-with-crt-static, and that matters: this binary
+# resolves the broker hostname itself (via the Rust std resolver), and musl's
+# resolver is built into libc and works in a fully static binary, whereas a
+# static glibc cannot dlopen its NSS modules to resolve a name. musl is safe
+# here precisely because there is no Go engine in the producer (the Go runtime
+# is what cannot run as a static guest on musl; that constraint lives in the
+# consumer's build, not this one).
+#
+# Build context is the example directory, and only producer/ is copied, so the
+# crate is neither needed nor present: cargo treats producer/ as a standalone
+# package and this image builds today, before the crate exists.
+
+FROM rust:1-bookworm AS build
+# TARGETARCH is provided by BuildKit (amd64 or arm64). Pick the musl target that
+# matches the build architecture so the native linker is used: cross-targeting
+# a different arch would hand x86-only flags (e.g. -m64) to the wrong cc.
+ARG TARGETARCH
+RUN set -eux; \
+    case "$TARGETARCH" in \
+      amd64) target=x86_64-unknown-linux-musl ;; \
+      arm64) target=aarch64-unknown-linux-musl ;; \
+      *) echo "unsupported TARGETARCH: $TARGETARCH" >&2; exit 1 ;; \
+    esac; \
+    echo "$target" > /musl-target; \
+    rustup target add "$target"
+WORKDIR /build
+COPY producer/ ./producer/
+WORKDIR /build/producer
+RUN set -eux; \
+    target="$(cat /musl-target)"; \
+    cargo build --release --target "$target"; \
+    cp "target/$target/release/producer" /producer
+
+FROM scratch AS runtime
+COPY --from=build /producer /producer
+ENTRYPOINT ["/producer"]

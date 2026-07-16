@@ -1,0 +1,9 @@
+# actionlint configuration.
+paths:
+  # publish-crate is deliberately parked behind a constant `if: false` until
+  # the one-time crates.io bootstrap (manual first publish, then trusted
+  # publisher setup) is done. actionlint's constant-condition rule would
+  # otherwise flag that as a mistake.
+  .github/workflows/release.yml:
+    ignore:
+      - 'constant expression "false" in condition'

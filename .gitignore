@@ -1,0 +1,46 @@
+# Rust build output (root crate, abi-check, and the example workspace).
+target/
+
+# `make engine` output: prebuilt libllingr.a per target triple.
+dist/
+
+# Stray engine artifacts if the Go bridge is built in place rather than into
+# OUT_DIR/dist (go build -buildmode=c-archive emits both).
+/libllingr.a
+/libllingr.h
+
+# Stray object files (e.g. a go.o left by an interrupted/in-place cgo build).
+# These are never source and must never be committed or packaged.
+*.o
+
+# The Go build binary from a bare `go build` in bridge/ (the engine is built via
+# build.rs / `make engine`, never left in the source tree).
+/bridge/bridge
+
+# abi-check drift guard keeps a LOCAL lockfile: a deliberate ABI change is made
+# with UPDATE_ABI_LOCK=1, so the lock must not be shared or reviewed.
+abi-check/abi.lock
+
+# The docs-examples compile-check harness is its own workspace; its lockfile is
+# generated and not committed (the check does not run --locked).
+docs-examples/Cargo.lock
+
+# Coverage output (make coverage / CI).
+coverage.lcov
+coverage-rust.lcov
+bridge/coverage-bridge.out
+*.profraw
+
+# Release-build byproducts if the release workflow steps are run locally.
+/*.crate
+/*.tar.gz
+/*.sigstore
+/*.cdx.json
+/*.spdx.json
+
+# Editors and OS cruft.
+.vscode/
+.idea/
+*.swp
+.DS_Store
+.claude/
