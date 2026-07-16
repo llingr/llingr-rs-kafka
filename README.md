@@ -7,7 +7,7 @@ everything else, compiled into your binary. One crate to depend on, one broker
 family to point it at (Apache Kafka and any Kafka-compatible broker such as
 RedPanda or Amazon MSK), and no runtime services to run alongside it.
 
-Underneath the safe Rust surface is the real llingr-demux engine: written in Go,
+Underneath the safe Rust layer is the real llingr-demux engine: written in Go,
 its offset and pipeline mechanisms formally verified with TLA+, and compiled into
 a static C archive that links directly into your Rust binary. Everything the engine guarantees in Go it guarantees here,
 because it is the same engine. Per-key ordering, contiguous offset commits,
@@ -71,7 +71,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-The required shape is a topic and two handlers; everything else on the builder
+The required configuration is a topic and two handlers; everything else on the builder
 is optional. `Builder`, `Message`, `Traits`, `ProcessHandler`, and
 `DeadLetterHandler` all come from a single `use llingr_kafka::...`: the handler
 traits and the message and trait types are defined in the shared `llingr-nexus`
@@ -98,11 +98,12 @@ artefact.
   No librdkafka, no CGO broker library. The same build works against Apache
   Kafka, RedPanda, and Amazon MSK. Options reference:
   [`docs/kafka-options.md`](docs/kafka-options.md).
-- **Security for real clusters**: TLS and mutual TLS, and SASL PLAIN,
-  SCRAM-SHA-256, and SCRAM-SHA-512, with AWS_MSK_IAM and OAUTHBEARER (OIDC) in
-  scope as a later phase. Full guide: [`docs/security.md`](docs/security.md).
-- **Typed engine tuning**: thirteen `DemuxConfig` knobs, each with an engine
-  default and validated at startup. Reference:
+- **Security for real clusters**: TLS and mutual TLS, SASL PLAIN,
+  SCRAM-SHA-256, and SCRAM-SHA-512, AWS_MSK_IAM for Amazon MSK, OAUTHBEARER
+  for OIDC client-credentials, and GCP IAM for Google Cloud Managed Service for
+  Apache Kafka. Full guide: [`docs/security.md`](docs/security.md).
+- **Typed engine tuning**: thirteen `DemuxConfig` settings, each with an
+  engine default and validated at startup. Reference:
   [`docs/configuration.md`](docs/configuration.md).
 - **Prometheus metrics** switched on by one builder call, served from a built-in
   scrape endpoint or mounted on an HTTP server you already run. Catalogue:
@@ -118,11 +119,11 @@ artefact.
 
 The topic is the builder's first argument. `brokers` and `consumer_group` are
 required. Kafka client options go through `Options` (typed, franz-go), and
-engine tuning goes through `DemuxConfig`. All thirteen engine knobs are exposed
-with their defaults; unset knobs use the engine default, and the engine
-validates ranges at startup and reports a clean error, never a crash. The full
-knob-by-knob reference, with units and when to change each, is in
-[`docs/configuration.md`](docs/configuration.md).
+engine tuning goes through `DemuxConfig`. All thirteen engine settings are
+exposed with their defaults; unset settings use the engine default, and the
+engine validates ranges at startup and reports a clean error, never a crash.
+The full setting-by-setting reference, with units and when to change each, is
+in [`docs/configuration.md`](docs/configuration.md).
 
 ```rust
 # use llingr_kafka::DemuxConfig;
@@ -138,23 +139,25 @@ let demux = DemuxConfig::new()
 `Options` is the single home for all Kafka client configuration, a typed builder
 over the franz-go client: offset reset, client id, static membership,
 session/heartbeat/rebalance timeouts, partition assignment strategies, fetch
-tuning, and the full TLS/SASL security surface. Anything the typed builder does
+tuning, and the full TLS/SASL security options. Anything the typed builder does
 not cover is reachable on the same `Options` builder as librdkafka-style string
 key/value pairs (`Options::new().kafka_option(key, value)`, or `.kafka_options(pairs)`
 for many at once), which the bridge translates into the equivalent franz-go
 option. Nothing is silently ignored: an unknown key fails at `build()` with the
 full list of supported keys, and conflicting security keys fail with a specific
-message (typed setters and string keys are validated together as one unit).
+message, because typed setters and string keys are validated together as one
+unit.
 
-**Coverage.** The full option surface, cross-checked against every
+**Coverage.** The full option set, cross-checked against every
 consumer-relevant franz-go `kgo` option, is in
 [`docs/kafka-options.md`](docs/kafka-options.md): the typed setters, the
-`llingr.` namespace options (poll-error tuning, retries, concurrent fetches), the
-string escape hatch, and the complete table of deliberately excluded options with
-their reasons (the auto-commit family, rebalance callbacks, share groups, the
-producer surface, and more, each excluded because the engine owns that part of
-the consumer). Every option is either supported, or excluded with a reason, or
-fails loudly at `build()` with the 41-key supported-key list. Security coverage
+`llingr.` namespace options for poll-error tuning, retries, and concurrent
+fetches, the string escape hatch, and the complete table of deliberately
+excluded options with their reasons. That excluded set covers the auto-commit
+family, rebalance callbacks, share groups, and the producer options among
+others, each excluded because the engine owns that part of the consumer. Every
+option is either supported, or excluded with a reason, or fails loudly at
+`build()` with the 53-key supported-key list. Security coverage
 is in [`docs/security.md`](docs/security.md).
 
 ## Security
@@ -170,14 +173,17 @@ not:
 | mTLS (client certificates, file paths and inline PEM) | supported |
 | SASL PLAIN | supported |
 | SASL SCRAM-SHA-256 / SCRAM-SHA-512 | supported |
-| AWS_MSK_IAM | in scope, later phase |
-| SASL OAUTHBEARER (OIDC client-credentials) | in scope, later phase |
+| AWS_MSK_IAM (Amazon MSK) | supported |
+| SASL OAUTHBEARER (OIDC client-credentials) | supported |
+| GCP IAM (OAUTHBEARER, Google Cloud Managed Service for Apache Kafka) | supported |
 | SASL GSSAPI (Kerberos) | not supported |
 | Custom token-callback IdP flows | not supported |
 
-This covers Confluent Cloud (API keys are SASL PLAIN over TLS), RedPanda,
-self-hosted SASL/SCRAM clusters, and mTLS shops. One worked example per
-mechanism, the credential-chain sources for AWS_MSK_IAM, and the full
+This covers Confluent Cloud, whose API keys are SASL PLAIN over TLS or
+OAUTHBEARER; Amazon MSK and Google Cloud Managed Service for Apache Kafka, both
+over IAM; RedPanda; self-hosted SASL/SCRAM clusters; and mTLS shops. One worked
+example per mechanism,
+the credential-chain sources for AWS_MSK_IAM and GCP IAM, and the full
 misconfiguration error catalogue are in [`docs/security.md`](docs/security.md).
 
 ## Metrics
@@ -199,9 +205,9 @@ serves OpenMetrics text at your chosen path. `registry()` runs no server: it
 takes no arguments and returns a `(Metrics, MetricsHandle)` pair over a
 crate-owned registry, so you pass the `Metrics` to the builder's `.metrics(...)`
 and serve the `MetricsHandle`'s OpenMetrics output from whatever HTTP framework
-you already run (the handle serves empty exposition text until `build()` and live
-data afterwards). The complete metric catalogue (names, types, labels,
-meanings), the bandwidth telemetry that rides along, and a worked example of
+you already run; the handle serves empty exposition text until `build()` and
+live data afterwards. The complete metric catalogue of names, types, labels, and
+meanings, the bandwidth telemetry that rides along, and a worked example of
 mounting on your own server are in [`docs/metrics.md`](docs/metrics.md).
 
 ## Logging
@@ -226,16 +232,16 @@ in [`docs/logging.md`](docs/logging.md).
 
 `engine.run()` blocks the calling thread until shutdown, so you arrange shutdown
 first: `engine.stopper()` returns a `Send` closure you move to a signal-watcher
-thread. `engine.stop()` drains in-flight work, commits, and releases `run()`
-(the clean path: zero duplicates on a rolling restart, provided the drain
-completes within `drain_timeout`, default 20 seconds; work a drain timeout
-abandons is redelivered). `engine.emergency_stop`
-stops now without draining, so abandoned in-flight work is redelivered on
-restart: llingr-kafka is at-least-once, so make your processing idempotent. An
-optional shutdown handler fires exactly once with a reason. `engine.snapshot()`
-(typed) and `engine.snapshot_json()` (the canonical JSON document) expose the
-consumer's live state for an operational endpoint. Only one engine may exist per
-process, because the Go runtime is process-global. Signal handling, the
+thread. `engine.stop()` drains in-flight work, commits, and releases `run()`.
+That is the clean path: zero duplicates on a rolling restart, provided the drain
+completes within `drain_timeout`, 20 seconds by default; work a drain timeout
+abandons is redelivered. `engine.emergency_stop` stops now without draining, so
+abandoned in-flight work is redelivered on restart: llingr-kafka is
+at-least-once, so make your processing idempotent. An optional shutdown handler
+fires exactly once with a reason. The typed `engine.snapshot()` and the
+canonical-JSON `engine.snapshot_json()` expose the consumer's live state for an
+operational endpoint. Only one engine may exist per process, because the Go
+runtime is process-global. Signal handling, the
 shutdown callback, thread budgeting, and liveness are all in
 [`docs/operations.md`](docs/operations.md).
 
@@ -257,11 +263,11 @@ triple. The record is in [`docs/internal/MUSL.md`](docs/internal/MUSL.md).
 ## Building
 
 Most of the time you build with plain `cargo build`: the build script compiles
-the engine from source the first time (fetching the pinned Go modules from the
-module proxy, verified against `go.sum`) and links the static archive into your
-binary. Docs.rs builds work with no Go toolchain (the build script emits nothing
-under `DOCS_RS`). Docker is never invoked from the build script; a `cargo build`
-stays deterministic.
+the engine from source the first time, fetching the pinned Go modules from the
+module proxy and verifying them against `go.sum`, then links the static archive
+into your binary. Docs.rs builds work with no Go toolchain, because the build
+script emits nothing under `DOCS_RS`. Docker is never invoked from the build
+script; a `cargo build` stays deterministic.
 
 If Go is not on the machine, there are three remedies, and the build script's
 error message names all three:
@@ -274,7 +280,7 @@ error message names all three:
    the prebuilt archive and skips Go entirely. This suits CI caches and
    air-gapped builds.
 3. **Build your whole application in the provided container**
-   (`docker/Dockerfile.builder`, which carries both Go and Rust), so the machine
+   (`docker/Dockerfile`, which contains both Go and Rust), so the machine
    needs only Docker.
 
 The `Makefile` is the single entry point: `make toolchains` reports what is
@@ -313,9 +319,9 @@ them; include it alongside any binary you distribute. Details in
 | [`docs/index.md`](docs/index.md) | What llingr-kafka is, when to use it, the capability map, how the pages fit together |
 | [`docs/getting-started.md`](docs/getting-started.md) | Toolchain requirements and a first consumer end to end against RedPanda |
 | [`docs/processing.md`](docs/processing.md) | `ProcessHandler`, `DeadLetterHandler`, `Traits`: per-key ordering, at-least-once and dedupe, the panic-to-dead-letter contract |
-| [`docs/configuration.md`](docs/configuration.md) | Every `DemuxConfig` engine knob: meaning, default, units, when to change it |
+| [`docs/configuration.md`](docs/configuration.md) | Every `DemuxConfig` engine setting: meaning, default, units, when to change it |
 | [`docs/kafka-options.md`](docs/kafka-options.md) | Typed `Options`, the string escape hatch, the full coverage matrix, unknown-key behaviour |
-| [`docs/security.md`](docs/security.md) | TLS/mTLS, SASL, AWS_MSK_IAM, OAUTHBEARER; one worked example each; the unsupported list and error catalogue |
+| [`docs/security.md`](docs/security.md) | TLS/mTLS, SASL, AWS_MSK_IAM, OAUTHBEARER, GCP IAM; one worked example each; the unsupported list and error catalogue |
 | [`docs/metrics.md`](docs/metrics.md) | Both activation modes, the metric catalogue, bandwidth telemetry, mounting on your own server |
 | [`docs/logging.md`](docs/logging.md) | The `log` facade, target `llingr`, level mapping, env_logger and tracing-log |
 | [`docs/operations.md`](docs/operations.md) | run/stop/emergency_stop, the shutdown callback, snapshots, signal handling, one instance per process |

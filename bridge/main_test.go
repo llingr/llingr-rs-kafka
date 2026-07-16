@@ -40,10 +40,10 @@ func (c *reentrantConsumer) Shutdown() error {
 	return nil
 }
 
-// resetBridgeForStop arranges bridge state as if initialised AND running (the
-// stop gate is open, as llingr_run leaves it) with the given consumer, and
+// resetBridgeForStop arranges bridge state as if initialised AND running,
+// the stop gate open as llingr_run leaves it, with the given consumer, and
 // registers cleanup. runDoneOnce is reset so each test can observe its
-// effect (it otherwise fires once per process).
+// effect; it otherwise fires once per process.
 func resetBridgeForStop(t *testing.T, consumer consumerHandle) {
 	t.Helper()
 	state.mu.Lock()
@@ -392,7 +392,7 @@ func TestEmergencyStopBeforeInitIsNoOp(t *testing.T) {
 
 // The snapshot crosses the FFI as the SAME JSON document the engine's HTTP
 // handler serves (snapshot.NewHandler json-encodes the identical struct).
-// Pin the top-level shape so a struct rename upstream is caught here.
+// Pin the top-level structure so a struct rename upstream is caught here.
 func TestMarshalSnapshotShape(t *testing.T) {
 	data, err := marshalSnapshot(snapshot.Snapshot{})
 	if err != nil {
@@ -410,7 +410,7 @@ func TestMarshalSnapshotShape(t *testing.T) {
 }
 
 // The init-error buffer truncation must never split a UTF-8 rune: the Rust
-// side decodes the buffer lossily, so a split rune would surface as U+FFFD
+// side decodes the buffer lossily, so a split rune would decode as U+FFFD
 // garbage at the end of an otherwise clean error message. Mirrors the Rust
 // boundary test write_c_err_truncates_on_char_boundary.
 func TestTruncateToRuneBoundary(t *testing.T) {

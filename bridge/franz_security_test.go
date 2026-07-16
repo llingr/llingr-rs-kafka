@@ -311,14 +311,14 @@ func TestFranzSecurityValidationErrors(t *testing.T) {
 			wantSub: "does not wire franz-go's Kerberos mechanism",
 		},
 		{
-			name: "oauthbearer not supported yet",
+			name: "oauthbearer rejects static credentials",
 			pairs: map[string]string{
 				"security.protocol": "sasl_ssl",
 				"sasl.mechanism":    "OAUTHBEARER",
 				"sasl.username":     "u",
 				"sasl.password":     "p",
 			},
-			wantSub: "OAUTHBEARER is not supported yet",
+			wantSub: "sasl.username/sasl.password are not used with OAUTHBEARER",
 		},
 		{
 			name: "unsupported mechanism lists supported",

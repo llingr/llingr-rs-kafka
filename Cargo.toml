@@ -17,11 +17,11 @@ categories = ["api-bindings", "concurrency", "network-programming"]
 # declares that so cargo refuses two crates claiming the same native library
 # in one dependency graph (one engine instance per process is a hard rule).
 links = "llingr"
-# The published package carries sources + bridge/ + LICENSE/NOTICES only.
+# The published package contains sources + bridge/ + LICENSE/NOTICES only.
 exclude = [
     "Makefile",
     "dist/",
-    "example/",
+    "examples/e2e/",
     ".github/",
     "abi-check/",
     "docker/",
@@ -35,6 +35,7 @@ exclude = [
     "CONTRIBUTING.md",
     "SECURITY.md",
     ".gitignore",
+    ".dockerignore",
 ]
 
 # Pre-baked means pre-baked: no cargo features, every capability always
@@ -59,3 +60,33 @@ serde_json = "1"
 # Used by the documented shutdown pattern in examples/doctests: a signal
 # handler sets an atomic flag, a normal thread calls stop().
 signal-hook = "0.3"
+
+# Examples live in a subdirectory (examples/auth/), which cargo does not
+# auto-discover; each needs an explicit target. The auth_ name prefix keeps
+# the group together in `cargo run --example` listings. Explicit paths make
+# a missing file a hard build error, so these blocks and the files move
+# together.
+
+[[example]]
+name = "auth_sasl_plain"
+path = "examples/auth/sasl_plain.rs"
+
+[[example]]
+name = "auth_scram_sha256"
+path = "examples/auth/scram_sha256.rs"
+
+[[example]]
+name = "auth_mtls"
+path = "examples/auth/mtls.rs"
+
+[[example]]
+name = "auth_aws_msk_iam"
+path = "examples/auth/aws_msk_iam.rs"
+
+[[example]]
+name = "auth_oauthbearer_oidc"
+path = "examples/auth/oauthbearer_oidc.rs"
+
+[[example]]
+name = "auth_gcp_iam"
+path = "examples/auth/gcp_iam.rs"

@@ -3,8 +3,8 @@
 
 //! Compile-only harness for the llingr-kafka documentation samples.
 //!
-//! This crate exists solely so CI can prove that every fenced `rust` sample in
-//! README.md and docs/*.md still compiles against the real llingr-kafka API.
+//! CI proves that every fenced `rust` sample in README.md and docs/*.md
+//! compiles against the real llingr-kafka API.
 //! build.rs mirrors those samples into a generated markdown file with `no_run`
 //! forced (they compile but never run, because the samples call the blocking
 //! `engine.run()`); the attribute below hands that file to rustdoc as doctests,

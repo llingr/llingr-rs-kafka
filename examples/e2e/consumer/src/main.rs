@@ -128,6 +128,23 @@ fn main() {
     let topic = std::env::var("TOPIC").unwrap_or_else(|_| "orders".to_string());
     let expected: u64 = env_or("EXPECTED", 1000);
 
+    // Security is env-driven and additive: with SASL_USERNAME set, the consumer
+    // authenticates with SCRAM-SHA-256 over TLS (sasl_ssl), trusting the CA at
+    // TLS_CA_LOCATION. The typed setters compute security.protocol=sasl_ssl from
+    // the presence of both a SASL and a TLS setter. Without SASL_USERNAME it
+    // connects in plaintext; the compose stack always authenticates.
+    let mut options = Options::new().auto_offset_reset(AutoOffsetReset::Earliest);
+    if let Ok(username) = std::env::var("SASL_USERNAME") {
+        if !username.is_empty() {
+            let password = std::env::var("SASL_PASSWORD").unwrap_or_default();
+            let ca_path = std::env::var("TLS_CA_LOCATION")
+                .unwrap_or_else(|_| "/certs/ca-cert.pem".to_string());
+            options = options
+                .sasl_scram_sha256(&username, &password)
+                .tls_ca_location(&ca_path);
+        }
+    }
+
     let state = Arc::new(State {
         processed: AtomicU64::new(0),
         failed: AtomicBool::new(false),
@@ -141,7 +158,7 @@ fn main() {
     )
     .brokers(&brokers)
     .consumer_group("orders-example")
-    .options(Options::new().auto_offset_reset(AutoOffsetReset::Earliest))
+    .options(options)
     .metrics(Metrics::serve("0.0.0.0:9464", "/metrics"))
     .shutdown(ShutdownLogger)
     .build();

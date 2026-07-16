@@ -4,8 +4,8 @@
 //! Routes engine log lines into the process-global [`log`] facade.
 //!
 //! There is deliberately no logger parameter anywhere in this crate's API:
-//! the `log` facade is process-global (the application installs env_logger,
-//! fern, tracing-log or any other implementation itself), and the engine's
+//! the `log` facade is process-global, the application installs env_logger,
+//! fern, tracing-log or any other implementation itself, and the engine's
 //! lines flow through it under the target [`LOG_TARGET`] with zero wiring.
 //! Applications filter or re-route them by target, for example
 //! `RUST_LOG=llingr=debug`; `tracing` users get everything via `tracing-log`.
@@ -23,7 +23,7 @@ pub const LOG_TARGET: &str = "llingr";
 pub(crate) struct LogRouter;
 
 impl LogRouter {
-    /// Create the router (stateless).
+    /// Create the stateless router.
     pub(crate) fn new() -> Self {
         Self
     }

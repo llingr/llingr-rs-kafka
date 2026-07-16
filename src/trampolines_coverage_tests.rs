@@ -1,12 +1,10 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 The llingr-rs-kafka Authors
 // SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Llingr-Commercial
 
-//! Coverage for the trampoline decode helpers (gap report Tier 2): the
-//! duplicate-header-key and null-header-value contract asserted directly on
-//! `borrow_headers`, deterministic and independent of the process-global
-//! handler set the boundary tests own.
-//!
-//! New coverage in a new file; the landed boundary tests stay byte-unmodified.
+//! Coverage for the trampoline decode helpers: the duplicate-header-key and
+//! null-header-value contract asserted directly on `borrow_headers`,
+//! deterministic and independent of the process-global handler set the
+//! boundary tests own.
 
 use std::os::raw::{c_char, c_int};
 
@@ -84,7 +82,7 @@ fn invalid_utf8_header_key_decodes_to_empty() {
 }
 
 /// A null array pointer or a non-positive count is an empty header list,
-/// never a crash (the trampolines' null-guard arm).
+/// never a crash: the trampolines' null guard.
 #[test]
 fn null_or_empty_header_arrays_decode_to_no_headers() {
     let scope = CallScope;

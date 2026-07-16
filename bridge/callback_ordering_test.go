@@ -19,8 +19,8 @@ import (
 
 // Registration on one locked OS thread, consumption on another, ordered
 // only by the C flag: the bridge's publication must make both the pointer
-// VALUE visible (the callback runs) and the access DATA-RACE-FREE (the race
-// detector stays quiet).
+// VALUE visible, so the callback runs, and the access DATA-RACE-FREE, so
+// the race detector stays quiet.
 func TestCrossThreadRegistrationPublishes(t *testing.T) {
 	testOrderReset()
 	t.Cleanup(clearTestLogCallback)
@@ -49,7 +49,7 @@ func TestCrossThreadRegistrationPublishes(t *testing.T) {
 
 // After a successful llingr_init the callback set is sealed: the engine
 // reads it per message from running workers, so a late registration is
-// ignored (reported on stderr) rather than becoming a live data race.
+// ignored and reported on stderr rather than becoming a live data race.
 func TestRegistrationAfterInitIsIgnored(t *testing.T) {
 	sealCallbacks()
 	t.Cleanup(func() { callbacksSealed.Store(false) })

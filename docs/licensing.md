@@ -52,7 +52,7 @@ under `AGPL-3.0-only`, then:
   source" means enough to build and modify the whole thing, including your
   application code that is linked with the engine.
 - **If you run the binary as a network service** that users interact with
-  remotely (the case the AGPL exists to cover), you must offer those users the
+  remotely, the case the AGPL exists to cover, you must offer those users the
   same complete corresponding source, under `AGPL-3.0-only`, even though you
   never hand them a binary. Merely keeping the service private does not avoid
   the obligation once remote users can use its functionality.
@@ -85,7 +85,7 @@ text records that this is your choice to make.
 
 ## The crates.io manifest and the dual choice
 
-The Cargo package manifest carries the full dual expression in its `license`
+The Cargo package manifest declares the full dual expression in its `license`
 field, `AGPL-3.0-only OR LicenseRef-Llingr-Commercial`, the same expression as
 every source file. Should a future crates.io publish reject the `LicenseRef-`
 identifier in that single field, the fallback is the plain `AGPL-3.0-only`
@@ -98,21 +98,21 @@ real: the `LICENSE` file is the authority, and it offers both.
 
 Because the engine links statically, your binary embeds third-party Go
 components whose licences require attribution when you distribute the binary.
-These components are invisible to Rust-side tooling (cargo, cargo-deny, and the
-crates.io metadata never see them), so the obligation is easy to miss. The one
-you must carry is the Kafka client:
+These components are invisible to Rust-side tooling, since cargo, cargo-deny, and
+the crates.io metadata never see them, so the obligation is easy to miss. The
+one you must carry is the Kafka client:
 
 - **franz-go** (`github.com/twmb/franz-go`) is BSD-3-Clause. The BSD-3-Clause
   licence requires that its copyright notice and licence text accompany binary
-  distributions. Other Go dependencies pulled in transitively (for example
+  distributions. Other transitive Go dependencies (for example
   `klauspost/compress`) carry their own permissive notices.
 
 The repository ships a `THIRD-PARTY-NOTICES` file listing these components and
 their licences, generated from the exact pinned Go modules the engine is built
 against, and a script to regenerate it whenever the pinned engine version
 moves. When you distribute a binary built from llingr-kafka, include
-`THIRD-PARTY-NOTICES` alongside it (in the image, in the release archive, or
-wherever your users can find it) so the embedded components' attribution
+`THIRD-PARTY-NOTICES` alongside it, in the image, in the release archive, or
+wherever your users can find it, so the embedded components' attribution
 requirements are met. This obligation is independent of which of the two
 licences you took the crate under: it comes from the bundled BSD-3-Clause and
 other permissive components, not from the AGPL/commercial choice.

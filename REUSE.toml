@@ -1,11 +1,10 @@
 version = 1
 
-# Bulk annotation for files that cannot or should not carry in-file SPDX
-# headers (structured configs, prose, attribution files, generated notices, the
-# lockfile, and the Go bridge manifests). Real source files (src/*.rs, build.rs,
-# bridge/*.go) and the build scripts (Makefile, docker/Dockerfile.builder,
-# gen-third-party-notices.sh) carry their own in-file headers instead;
-# precedence = "closest" keeps any in-file header authoritative.
+# Bulk SPDX licensing for files that cannot have an in-file header: lockfiles,
+# Go module manifests, prose, and generated or structured files.
+#
+# Source files and build scripts have their own in-file headers and do not need
+# to be listed here: precedence = "closest" prioritises in-file headers.
 [[annotations]]
 path = [
     ".dockerignore",
@@ -18,15 +17,18 @@ path = [
     "COPYRIGHT",
     "Cargo.lock",
     "abi-check/Cargo.lock",
-    "example/Cargo.lock",
+    "examples/e2e/Cargo.lock",
     "README.md",
     "SECURITY.md",
     "THIRD-PARTY-NOTICES",
     "deny.toml",
     "bridge/go.mod",
     "bridge/go.sum",
+    "examples/e2e/**/go.mod",
+    "examples/e2e/**/go.sum",
     "docs/**/*.md",
-    "example/**/*.md",
+    "examples/e2e/**/*.md",
+    "examples/README.md",
 ]
 precedence = "closest"
 SPDX-FileCopyrightText = "Copyright (c) 2026 The llingr-rs-kafka Authors"

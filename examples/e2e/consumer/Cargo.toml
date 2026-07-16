@@ -13,9 +13,10 @@ publish = false
 license = "AGPL-3.0-only OR LicenseRef-Llingr-Commercial"
 
 [dependencies]
-# The crate under test, by path. A real application would depend on the
-# published crate instead: llingr-kafka = "x.y".
-llingr-kafka = { path = "../.." }
+# The crate under test, by path (the repository root, three levels up from
+# examples/e2e/consumer/). A real application would depend on the published
+# crate instead: llingr-kafka = "x.y".
+llingr-kafka = { path = "../../.." }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # env_logger is the whole logging story: installing it in two lines is the

@@ -1,0 +1,12 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 The llingr-rs-kafka Authors
+# SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Llingr-Commercial
+#
+# Redpanda CLUSTER-config seed, mounted at /etc/redpanda/.bootstrap.yaml. These
+# are cluster properties (not node config), applied once at first boot: turn on
+# SASL for every Kafka listener and make "appuser" a superuser. The appuser's
+# SCRAM-SHA-256 credential is created separately by the init service via the
+# admin API (which needs no auth by default), because a bootstrap file seeds
+# properties, not user secrets.
+superusers:
+  - appuser
+enable_sasl: true

@@ -3,12 +3,12 @@
 
 //! Engine configuration and the bridge config JSON.
 //!
-//! [`BrokerConfig`] is internal plumbing: the public surface is the engine
+//! [`BrokerConfig`] is internal plumbing: the public API is the engine
 //! builder's `.brokers()` / `.consumer_group()` methods and the
-//! [`Options`](crate::Options) builder (whose entries land here), collected
+//! [`Options`](crate::Options) builder, whose entries land here, collected
 //! into the JSON document the Go bridge parses. [`DemuxConfig`] is public
 //! API, mirroring Go's `config.DemuxConfig`: the thirteen validated engine
-//! tunables, all optional over production defaults.
+//! settings, all optional over production defaults.
 
 use std::time::Duration;
 
@@ -22,7 +22,7 @@ use llingr_nexus::AdapterOptions;
 /// builder: brokers, consumer group, and the librdkafka-style option pairs
 /// emitted by [`Options`](crate::Options).
 ///
-/// Deliberately no `Debug`: the option pairs may carry credentials
+/// Deliberately no `Debug`: the option pairs may contain credentials
 /// (`sasl.password`, ...). Log the [`Options`](crate::Options) builder
 /// instead; its `Debug` output redacts secrets.
 #[derive(Clone, Default)]
@@ -30,19 +30,19 @@ pub(crate) struct BrokerConfig {
     brokers: String,
     consumer_group: String,
     kafka_config: Vec<(String, String)>,
-    /// First client-side validation failure (from
-    /// [`AdapterOptions::validate`]), surfaced as an error at engine build
+    /// First client-side validation failure from
+    /// [`AdapterOptions::validate`], surfaced as an error at engine build
     /// time so the fluent builder chain stays infallible.
     deferred_error: Option<String>,
 }
 
 impl BrokerConfig {
-    /// An empty configuration (no brokers, no group, no options).
+    /// An empty configuration: no brokers, no group, no options.
     pub(crate) fn new() -> Self {
         Self::default()
     }
 
-    /// Broker address(es), comma-separated (e.g. "broker1:9092,broker2:9092").
+    /// Comma-separated broker addresses, for example "broker1:9092,broker2:9092".
     pub(crate) fn brokers(mut self, brokers: &str) -> Self {
         self.brokers = brokers.to_string();
         self
@@ -55,12 +55,12 @@ impl BrokerConfig {
     }
 
     /// Add one librdkafka-style option pair. Repeating a key is allowed and
-    /// deterministic: the LAST write wins (the layered-config idiom), applied
-    /// across [`kafka_option`](Self::kafka_option) and
+    /// deterministic: the LAST write wins, as in layered configuration,
+    /// applied across [`kafka_option`](Self::kafka_option) and
     /// [`adapter_options`](Self::adapter_options) in call order.
     ///
-    /// Production code feeds pairs in through [`adapter_options`] (the
-    /// public escape hatch lives on `Options`); this direct form exists for
+    /// Production code feeds pairs in through [`adapter_options`], and the
+    /// public escape hatch lives on `Options`; this direct form exists for
     /// the config tests.
     #[cfg(test)]
     pub(crate) fn kafka_option(mut self, key: impl Into<String>, value: impl ToString) -> Self {
@@ -68,8 +68,8 @@ impl BrokerConfig {
         self
     }
 
-    /// Ingest a typed options builder: validate it client-side (a failure is
-    /// deferred to engine build time) and append its option entries.
+    /// Ingest a typed options builder: validate it client-side, deferring
+    /// any failure to engine build time, and append its option entries.
     pub(crate) fn adapter_options(mut self, options: impl AdapterOptions) -> Self {
         if let Err(message) = options.validate() {
             self.deferred_error.get_or_insert(message);
@@ -84,16 +84,16 @@ impl BrokerConfig {
         self.deferred_error.as_deref()
     }
 
-    /// The configured consumer group, for labelling telemetry that (unlike
-    /// the wire config) needs it Rust-side.
+    /// The configured consumer group: telemetry labels need it Rust-side,
+    /// the wire config does not.
     pub(crate) fn consumer_group_value(&self) -> &str {
         &self.consumer_group
     }
 
     /// The kafka_config pairs with duplicate keys resolved: the LAST value
-    /// written wins, so layering (base config, then overrides) behaves the
+    /// written wins, so layering base config then overrides behaves the
     /// way Kafka client users expect, and the emitted JSON object never
-    /// carries duplicate keys.
+    /// contains duplicate keys.
     fn deduped_kafka_config(&self) -> Vec<(String, String)> {
         let mut deduped: Vec<(String, String)> = Vec::with_capacity(self.kafka_config.len());
         for (key, value) in &self.kafka_config {
@@ -111,12 +111,12 @@ impl BrokerConfig {
 // DemuxConfig
 // ---------------------------------------------------------------------------
 
-/// Engine tunables, mirroring Go's `config.DemuxConfig`. Anything left unset
+/// Engine settings, mirroring Go's `config.DemuxConfig`. Anything left unset
 /// receives the engine's production default, and every value is
 /// range-validated at build time, reported as a clean error rather than a
 /// crash. The defaults are good enough for most situations.
 ///
-/// `Duration`-valued tunables serialise as whole milliseconds; a
+/// `Duration`-valued settings serialise as whole milliseconds; a
 /// sub-millisecond remainder rounds up, so a non-zero `Duration` never
 /// silently becomes zero.
 #[derive(Debug, Clone, Default)]
@@ -137,7 +137,7 @@ pub struct DemuxConfig {
 }
 
 impl DemuxConfig {
-    /// Create a configuration with every tunable unset (engine defaults).
+    /// Create a configuration with every setting unset: the engine defaults.
     pub fn new() -> Self {
         Self::default()
     }
@@ -186,7 +186,7 @@ impl DemuxConfig {
 
     /// Commit ingest channel length. An explicit value must be in the range
     /// [1000, 200000]; a value outside that range is a startup error. Left
-    /// unset (or set to zero) the length is derived from concurrent_keys.
+    /// unset or set to zero, the length is derived from concurrent_keys.
     pub fn commit_ingest_channel_len(mut self, n: u32) -> Self {
         self.commit_ingest_channel_len = Some(n);
         self
@@ -237,7 +237,7 @@ impl DemuxConfig {
         self
     }
 
-    /// The "demux" JSON object, or None when no tunable is set.
+    /// The "demux" JSON object, or None when no setting is set.
     /// Field names match the Go config.DemuxConfig JSON tags; durations are
     /// millisecond strings parsed by its UnmarshalJSON via time.ParseDuration.
     fn demux_json(&self) -> Option<String> {
@@ -290,12 +290,12 @@ impl DemuxConfig {
 }
 
 // ---------------------------------------------------------------------------
-// JSON assembly (bridge contract)
+// JSON assembly: the bridge contract
 // ---------------------------------------------------------------------------
 
 /// Serialise the full configuration to JSON for the Go bridge. Built
-/// manually (the shape is the bridge's contract); the adapter is hard-wired
-/// to "franz", the only broker composition this crate ships.
+/// manually because the layout is the bridge's contract; the adapter is
+/// hard-wired to "franz".
 pub(crate) fn config_json(
     topic: &str,
     broker: &BrokerConfig,
@@ -444,10 +444,10 @@ mod tests {
         assert!(json.contains(r#""workerShardsCount":32"#));
     }
 
-    /// Every one of the thirteen DemuxConfig tunables must serialise under
+    /// Every one of the thirteen DemuxConfig settings must serialise under
     /// EXACTLY the Go config.DemuxConfig JSON tag. A typo in any tag compiles,
-    /// passes every other test, and silently reverts that tunable to the
-    /// engine default in production (Go ignores unknown keys).
+    /// passes every other test, and silently reverts that setting to the
+    /// engine default in production, because Go ignores unknown keys.
     #[test]
     fn all_thirteen_demux_tags_match_go() {
         let demux = DemuxConfig::new()
@@ -487,8 +487,8 @@ mod tests {
     }
 
     /// The escaper's remaining branches: tab, carriage return, and the
-    /// generic control-character \u escape (an unescaped control char is
-    /// malformed JSON and would fail engine init).
+    /// generic control-character \u escape. An unescaped control character
+    /// is malformed JSON and would fail engine init.
     #[test]
     fn json_escaping_control_characters() {
         let broker = minimal_broker().kafka_option("key", "a\tb\rc\u{1}d");
@@ -528,7 +528,7 @@ mod tests {
             }
         }
 
-        // By value and by reference both work (blanket impl in nexus).
+        // By value and by reference both work; the blanket impl is in nexus.
         let broker = minimal_broker()
             .adapter_options(&FakeOptions)
             .adapter_options(FakeOptions);

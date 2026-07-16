@@ -4,16 +4,15 @@
 package main
 
 import (
+	"slices"
 	"strings"
 	"testing"
 	"time"
 )
 
 func TestCompiledAdaptersIncludesFranz(t *testing.T) {
-	for _, name := range compiledAdapters {
-		if name == "franz" {
-			return
-		}
+	if slices.Contains(compiledAdapters, "franz") {
+		return
 	}
 	t.Fatalf("compiledAdapters missing franz under with_franz: %v", compiledAdapters)
 }
@@ -92,12 +91,12 @@ func TestFranzPartitionAssignmentStrategy(t *testing.T) {
 }
 
 func TestFranzIsolationLevelAlignment(t *testing.T) {
-	// Explicit read_committed: accepted (redundant with the bridge default).
+	// Explicit read_committed: accepted; it restates the bridge default.
 	if _, berr := franzKgoOpts(map[string]string{"isolation.level": "read_committed"}); berr != nil {
 		t.Fatalf("read_committed must be accepted: %v", berr)
 	}
-	// read_uncommitted: rejected (aborted transactional records would be
-	// processed and committed downstream).
+	// read_uncommitted: rejected; aborted transactional records would be
+	// processed and committed downstream.
 	_, berr := franzKgoOpts(map[string]string{"isolation.level": "read_uncommitted"})
 	if berr == nil || !strings.Contains(berr.msg, "read_uncommitted is rejected") {
 		t.Fatalf("read_uncommitted must be rejected with the parity rationale, got: %v", berr)

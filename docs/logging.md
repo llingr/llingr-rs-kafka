@@ -18,7 +18,7 @@ fight that model, so there is none. You install a logger once, at the top of
 
 The engine logs its lifecycle and any anomalies: the licence notice at startup,
 the subscription starting, rebalances completing, poll retries and errors,
-drains nearing their timeout, and an emergency shutdown firing. Each line carries one of four engine severities, mapped onto the
+drains nearing their timeout, and an emergency shutdown firing. Each line has one of four engine severities, mapped onto the
 matching `log` level:
 
 | Engine severity | Rust `log` level | Typical lines |
@@ -50,7 +50,7 @@ you will not see it. The cases are:
 - **A valid commercial token:** a line reading `[VERIFIED] llingr-demux instance
   is licensed to "..."` logs at Info, so it appears at `RUST_LOG=info`.
 - **An expired token:** the notice logs at Info, plus a separate Warn line
-  carrying the expiry error.
+  with the expiry error.
 - **A malformed or not-yet-valid token:** the notice logs at Debug, plus a Warn
   line explaining the problem.
 
@@ -58,7 +58,7 @@ The notice reaches your logger through the same `log` facade as every other
 engine line, because the crate registers its logging before the engine
 initialises, so the startup notice is captured rather than lost. If you are
 auditing which licence a build is running under, `RUST_LOG=llingr=debug` is the
-setting that surfaces the notice in every case.
+setting that shows the notice in every case.
 
 ## env_logger
 
@@ -136,7 +136,7 @@ name is identical across the two ecosystems because it is set once, on the
 llingr-kafka logs through the facade and nothing more; it never writes to stderr
 itself. This mirrors how every `log`-based library behaves: if your application
 installs no logger, the `log` facade discards all records, the engine's
-included, and you see no engine output at all. That is not an error, just the
+included, and you see no engine output. That is not an error, just the
 facade's default. Install any `log`-compatible logger to see the lines.
 
 ## Not the same as the Kafka client's log level
@@ -145,6 +145,6 @@ The engine logs described here are llingr-demux's own lifecycle logging. The
 underlying franz-go Kafka client has its own, separate internal log verbosity,
 which you set with the `client_log_level` Kafka option rather than through the
 `log` facade. If you are chasing broker-protocol detail (connection handshakes,
-metadata refreshes) rather than engine lifecycle, that option is the knob; it is
-documented in `docs/kafka-options.md`. The `RUST_LOG=llingr=...` filtering on
+metadata refreshes) rather than engine lifecycle, that option is the control;
+it is documented in `docs/kafka-options.md`. The `RUST_LOG=llingr=...` filtering on
 this page governs the engine's lines, not the Kafka client's.

@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 The llingr-rs-kafka Authors
 // SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Llingr-Commercial
 
-// Coverage test support (gap report Tier 1/2): Go test files cannot import
+// Coverage test support: Go test files cannot import
 // "C", so the tests that exercise C-typed seams reach them through the
 // helpers here. Like testsupport.go, this file is referenced only by tests;
 // the linker drops it from shipped builds. The C test callbacks let the
@@ -131,7 +131,7 @@ func writeInitErrView(msg string, capacity int) (string, int) {
 }
 
 // writeInitErrNilGuards exercises writeInitErr's nil/zero-capacity guards;
-// it returns normally when the guards hold (no write, no crash).
+// it returns normally when the guards hold: no write, no crash.
 func writeInitErrNilGuards(msg string) {
 	var length C.int = -1
 	writeInitErr(nil, 16, &length, msg) // nil buffer

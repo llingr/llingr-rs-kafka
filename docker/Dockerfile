@@ -1,19 +1,19 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 The llingr-rs-kafka Authors
 # SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Llingr-Commercial
 #
-# The "machine with both toolchains" that MODE=docker builds inside. It carries
-# Go 1.25, a C compiler (cgo), Rust (stable), make, and libclang (abi-check's
-# bindgen). The repo is bind-mounted at run time and the Makefile re-invokes the
-# requested target with MODE=native inside this image, so the image never COPYs
-# repo sources and holds no build logic of its own.
+# Builder image with both toolchains: Go 1.25, a C compiler for cgo, stable
+# Rust, make, and libclang for abi-check's bindgen. MODE=docker builds run
+# inside it: the repo is bind-mounted at run time and the Makefile re-invokes
+# the requested target with MODE=native, so the image never COPYs repo
+# sources and holds no build logic of its own.
 #
-# Debian/glibc, never Alpine: the engine is glibc-only for now (see the LIBC arm
-# below and docs/internal/MUSL.md).
+# Debian/glibc, never Alpine: the engine is glibc-only for now; see the LIBC
+# branch below and docs/internal/MUSL.md.
 # syntax=docker/dockerfile:1
 
 FROM golang:1.25-bookworm
 
-# musl seam (2 of 3; the others are the Makefile and the *-musl arm in build.rs).
+# musl seam, one of three with the Makefile and the *-musl branch in build.rs.
 # Keep this message identical to the Makefile's MUSL_MSG.
 ARG LIBC=glibc
 RUN if [ "$LIBC" != glibc ]; then \
@@ -21,9 +21,9 @@ RUN if [ "$LIBC" != glibc ]; then \
       exit 1; \
     fi
 
-# golang:1.25-bookworm already provides go, gcc, cc, and curl. Add make (the
-# Makefile is the in-container entry point) and libclang-dev (abi-check runs
-# bindgen over the cgo-emitted header).
+# golang:1.25-bookworm already provides go, gcc, cc, and curl. Add make, the
+# in-container entry point, and libclang-dev for abi-check's bindgen over the
+# cgo-emitted header.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends make libclang-dev \
  && rm -rf /var/lib/apt/lists/*

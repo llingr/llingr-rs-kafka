@@ -10,8 +10,8 @@
 #   PROFILE release | debug           optimisation level (default release)
 #
 # MODE=auto builds natively when Go 1.25+, a C compiler, and cargo are all
-# present, otherwise it builds inside the Docker builder image (docker/
-# Dockerfile.builder). Docker mode re-invokes the SAME make target with
+# present, otherwise it builds inside the Docker builder image
+# (docker/Dockerfile). Docker mode re-invokes the SAME make target with
 # MODE=native inside that image, so the native and docker paths run identical
 # commands and no build logic is duplicated.
 
@@ -33,8 +33,8 @@ ifeq ($(filter $(LIBC),glibc musl),)
 $(error LIBC must be glibc or musl (got '$(LIBC)'))
 endif
 
-# musl seam (1 of 3; the others are docker/Dockerfile.builder and the *-musl arm
-# in build.rs). A static c-archive needs only the first fix, but that fix is
+# musl seam, one of three with docker/Dockerfile and the *-musl branch in
+# build.rs. A static c-archive needs only the first fix, but that fix is
 # unmerged, so musl fails here honestly rather than producing a binary that
 # segfaults in Go runtime init. Keep this message identical across the three
 # seams; see docs/internal/MUSL.md for the flip instructions.
@@ -79,7 +79,7 @@ TARGET_TRIPLE := $(shell rustc -vV 2>/dev/null | awk '/^host:/ {print $$2}')
 # Coverage measures this crate's own first-party code only. build.rs is a build
 # script, not exercised by the test binaries, so it is kept out of the line
 # counts; the upstream engine modules live in other repos and the crate's
-# dependencies are excluded by cargo-llvm-cov by default. example/,
+# dependencies are excluded by cargo-llvm-cov by default. examples/e2e/,
 # docs-examples/ and abi-check/ are separate cargo packages and are not part of
 # this coverage run at all.
 COVERAGE_IGNORE := --ignore-filename-regex 'build\.rs'
@@ -88,11 +88,11 @@ BUILDER_IMAGE      := llingr-rs-kafka-builder:local
 GO_CACHE_VOLUME    := llingr-rs-kafka-go
 CARGO_CACHE_VOLUME := llingr-rs-kafka-cargo
 
-# The example stack's compose file lives in example/. Running compose with -f
-# from the repo root (rather than cd example) keeps the build context
+# The example stack's compose file lives in examples/e2e/. Running compose with
+# -f from the repo root (rather than cd) keeps the build context
 # repo-root-relative, which the consumer image needs to reach Cargo.toml,
 # build.rs, src/ and bridge/.
-COMPOSE := docker compose -f example/docker-compose.yml
+COMPOSE := docker compose -f examples/e2e/docker-compose.yml
 
 # Re-invoke the current make target ($@) inside the builder image with
 # MODE=native. The repo is bind-mounted at /work; the Go and cargo caches are
@@ -101,7 +101,7 @@ COMPOSE := docker compose -f example/docker-compose.yml
 # /root/.cargo/bin is not shadowed.
 define run-in-builder
 	@command -v docker >/dev/null 2>&1 || { echo "error: MODE=$(MODE) resolved to docker but docker is not installed. Install Docker, or install Go 1.25+, a C compiler and Rust for a native build."; exit 1; }
-	docker build --build-arg LIBC=$(LIBC) -t $(BUILDER_IMAGE) -f docker/Dockerfile.builder docker
+	docker build --build-arg LIBC=$(LIBC) -t $(BUILDER_IMAGE) docker
 	docker run --rm \
 		-v "$(CURDIR)":/work -w /work \
 		-v $(GO_CACHE_VOLUME):/go \
@@ -154,6 +154,9 @@ ifeq ($(RESOLVED_MODE),docker)
 else
 	cd bridge && go test ./...
 	cargo test --locked $(CARGO_PROFILE_FLAG)
+	# Compile-check the crate-root examples/ (auth walkthroughs shipped in the
+	# crate); `cargo test` does not build them, so gate them explicitly.
+	cargo check --examples --locked $(CARGO_PROFILE_FLAG)
 	# abi-check regenerates the C contract from the cgo-emitted header, which it
 	# discovers at dist/<triple>/libllingr.h. Build the engine first so a fresh
 	# clone's `make test` is self-sufficient rather than failing until `make
@@ -278,6 +281,6 @@ help:
 	@echo "  make example-up     - bring the example stack up (RedPanda + producer + consumer)"
 	@echo "  make example-down   - tear the example stack down (-v)"
 	@echo "  make example-verify - one-shot E2E: exit 0 proves the full chain"
-	@echo "  make clean          - remove dist/, target/, and example/builder images"
+	@echo "  make clean          - remove dist/, target/, and the example and builder images"
 	@echo ""
 	@echo "  MODE=auto currently resolves to: $(RESOLVED_MODE)"

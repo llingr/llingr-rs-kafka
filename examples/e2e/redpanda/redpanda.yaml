@@ -1,0 +1,41 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 The llingr-rs-kafka Authors
+# SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Llingr-Commercial
+#
+# Redpanda NODE config, mounted at /etc/redpanda/redpanda.yaml. rpk v24's
+# `redpanda start` has no --set flag, so the sasl_ssl listener and its TLS live
+# here rather than on the command line. One Kafka listener named sasl_tls:
+# authentication_method sasl (SASL is turned on cluster-wide by the bootstrap
+# file) plus TLS from the generated broker cert. enable_sasl and the superuser
+# are cluster config, seeded by .bootstrap.yaml.
+redpanda:
+  data_directory: /var/lib/redpanda/data
+  empty_seed_starts_cluster: true
+  seed_servers: []
+  rpc_server:
+    address: 0.0.0.0
+    port: 33145
+  # A single node still validates its advertised RPC address; it cannot be
+  # ADDR_ANY (0.0.0.0), so advertise the service name explicitly.
+  advertised_rpc_api:
+    address: redpanda
+    port: 33145
+  kafka_api:
+    - address: 0.0.0.0
+      port: 9092
+      name: sasl_tls
+      authentication_method: sasl
+  advertised_kafka_api:
+    - address: redpanda
+      port: 9092
+      name: sasl_tls
+  kafka_api_tls:
+    - name: sasl_tls
+      enabled: true
+      cert_file: /certs/server-cert.pem
+      key_file: /certs/server-key.pem
+      require_client_auth: false
+  admin:
+    - address: 0.0.0.0
+      port: 9644
+rpk:
+  overprovisioned: true

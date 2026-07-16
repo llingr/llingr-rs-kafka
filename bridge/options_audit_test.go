@@ -1,9 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 The llingr-rs-kafka Authors
 // SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Llingr-Commercial
 
-// Coverage for the section 4.1 options-audit additions: the new curated kgo
-// keys and the llingr.poll.error.* adapter options. New coverage in a new
-// file; the landed donor tests stay byte-unmodified.
+// Coverage for the curated kgo option keys and the llingr.poll.error.*
+// adapter options.
 
 package main
 
@@ -14,7 +13,7 @@ import (
 )
 
 func TestAuditKeysTranslateToOptions(t *testing.T) {
-	// Each value-carrying key translates to exactly one kgo option.
+	// Each key that takes a value translates to exactly one kgo option.
 	opts, berr := franzKgoOpts(map[string]string{
 		"socket.connection.setup.timeout.ms": "5000",
 		"connections.max.idle.ms":            "60000",
@@ -214,8 +213,8 @@ func TestPopPollErrorOptionsBoundaryValuesAccepted(t *testing.T) {
 }
 
 // The poll-error keys are adapter options, not kgo options: fed through the
-// public entry point unpopped they must hit the unknown-key error (proving
-// nothing silently ignores them if the pop is ever bypassed).
+// public entry point unpopped they must hit the unknown-key error, so nothing
+// silently ignores them if the pop is bypassed.
 func TestPollErrorKeysAreNotKgoOptions(t *testing.T) {
 	_, berr := franzKgoOpts(map[string]string{"llingr.poll.error.bail.after.ms": "300000"})
 	if berr == nil {
@@ -224,7 +223,7 @@ func TestPollErrorKeysAreNotKgoOptions(t *testing.T) {
 }
 
 // The bounds the bridge validates against must equal the adapter's clamp
-// bounds; if the adapter changes them on a version bump this trips.
+// bounds; if the adapter changes them on a version update this trips.
 func TestPollErrorBoundsMatchAdapterClamps(t *testing.T) {
 	if minPollErrorBailAfter != time.Minute {
 		t.Fatalf("minPollErrorBailAfter = %s, want 1m", minPollErrorBailAfter)

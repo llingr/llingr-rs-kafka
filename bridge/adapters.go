@@ -1,11 +1,6 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 The llingr-rs-kafka Authors
 // SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Llingr-Commercial
 
-// One broker composition, no build variants: this library carries the
-// pure-Go franz adapter (adapter_franz.go) and nothing else. There is no
-// adapter selection; a config naming any other adapter fails llingr_init
-// with a clean error from parseBridgeConfig.
-
 package main
 
 import (
@@ -26,7 +21,7 @@ var compiledAdapters []string
 
 // consumerHandle is the non-generic slice of the consumer the bridge stores:
 // lifecycle control and the snapshot are type-parameter-free, so the bridge
-// state never carries the concrete record type.
+// state never references the concrete record type.
 type consumerHandle interface {
 	Subscribe() error
 	Shutdown() error
@@ -34,10 +29,10 @@ type consumerHandle interface {
 	TakeSnapshot() snapshot.Snapshot
 }
 
-// buildConsumer wires the franz consumer (the only broker composition this
-// library ships) and returns a running consumer handle plus the adapter's
-// broker-release function (its Unsubscribe: leave group, close client), which
-// the bridge keeps for the emergency exit path (see emergencyBrokerCleanup).
+// buildConsumer wires the franz consumer and returns a running consumer
+// handle plus the adapter's broker-release function, its Unsubscribe: leave
+// group, close client. The bridge keeps the release function for the
+// emergency exit path (see emergencyBrokerCleanup).
 func buildConsumer(ctx context.Context, cfg bridgeConfig) (consumerHandle, func() error, *bridgeError) {
 	return buildFranzConsumer(ctx, cfg)
 }
@@ -45,8 +40,8 @@ func buildConsumer(ctx context.Context, cfg bridgeConfig) (consumerHandle, func(
 // newBridgeBuilder assembles the demux ConsumerBuilder. valueOf extracts the
 // raw message value from the adapter's native payload type and metaOf
 // extracts its timestamp and headers; key, partition, and offset come from
-// the already-extracted nexus envelope (the adapter guarantees UTF-8-safe
-// keys: raw if valid, base64 if binary, partition number if absent).
+// the already-extracted nexus envelope. The adapter guarantees UTF-8-safe
+// keys: raw if valid, base64 if binary, the partition number if absent.
 func newBridgeBuilder[T any](ctx context.Context, cfg bridgeConfig, bw parsedBandwidth, valueOf func(T) []byte, metaOf func(T) recordMeta) *demux.ConsumerBuilder[T] {
 	builder := demux.NewBuilder[T](
 		cfg.Topic,
@@ -71,8 +66,8 @@ func newBridgeBuilder[T any](ctx context.Context, cfg bridgeConfig, bw parsedBan
 	}
 
 	// Bandwidth telemetry: enabled by the host registering the bandwidth
-	// callback (the adapters' WithBandwidthInterval is wired by the caller,
-	// which owns the concrete adapter type).
+	// callback. The adapter's WithBandwidthInterval is wired by the caller,
+	// which owns the concrete adapter type.
 	if loadCallbacks().bandwidth != nil {
 		builder = builder.WithBandwidthMetricsSink(bandwidthSink())
 		if bw.flushInterval > 0 {
@@ -84,9 +79,9 @@ func newBridgeBuilder[T any](ctx context.Context, cfg bridgeConfig, bw parsedBan
 }
 
 // asConsumerHandle narrows the adapter's nexus.Consumer to the bridge handle.
-// The concrete *demux.Consumer[T] carries TakeSnapshot and EmergencyShutdown
-// (the nexus interface does not), so this always succeeds with the real
-// engine; the assertion exists to fail loudly rather than panic if that ever
+// The concrete *demux.Consumer[T] provides TakeSnapshot and EmergencyShutdown,
+// which the nexus interface does not, so this always succeeds with the real
+// engine; the assertion exists to fail loudly rather than panic if that
 // changes.
 func asConsumerHandle(consumer any) (consumerHandle, *bridgeError) {
 	handle, ok := consumer.(consumerHandle)
@@ -98,9 +93,9 @@ func asConsumerHandle(consumer any) (consumerHandle, *bridgeError) {
 }
 
 // reservedOptionKeys are set through the dedicated config fields and may not
-// arrive as client option pairs: a pair would silently override the field
-// (the ConfigMap is last-write-wins), which is exactly the kind of quiet
-// misconfiguration this bridge exists to prevent.
+// arrive as client option pairs: a pair would silently override the field,
+// because the ConfigMap is last-write-wins, which is exactly the kind of
+// quiet misconfiguration this bridge exists to prevent.
 var reservedOptionKeys = map[string]string{
 	"bootstrap.servers": "brokers()",
 	"group.id":          "consumer_group()",
@@ -124,8 +119,8 @@ func millisOption(key, value string) (time.Duration, error) {
 	return time.Duration(ms) * time.Millisecond, nil
 }
 
-// nonNegativeMillisOption is millisOption for keys where 0 is meaningful
-// (it disables the behaviour rather than selecting a default).
+// nonNegativeMillisOption is millisOption for keys where 0 is meaningful:
+// it disables the behaviour rather than selecting a default.
 func nonNegativeMillisOption(key, value string) (time.Duration, error) {
 	ms, err := strconv.Atoi(value)
 	if err != nil || ms < 0 {
@@ -146,8 +141,8 @@ func boolOption(key, value string) (bool, error) {
 	}
 }
 
-// asBridgeError narrows the error interface the option helpers return (their
-// concrete type is always *bridgeError) without losing the stable code.
+// asBridgeError narrows the error interface the option helpers return, whose
+// concrete type is always *bridgeError, without losing the stable code.
 func asBridgeError(err error) *bridgeError {
 	if berr, ok := err.(*bridgeError); ok {
 		return berr

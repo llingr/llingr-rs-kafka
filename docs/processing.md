@@ -90,11 +90,12 @@ A `Message` is a read-only view of one Kafka record. Its accessors are:
   parse yourself where the payload is not text.
 - `topic() -> &str`, `partition() -> i32`, `offset() -> i64`: the record's
   coordinates.
-- `timestamp() -> Timestamp`: an enum that carries both the instant and its
-  kind. It is `NotAvailable`, `CreateTime { millis }` (producer-assigned event
-  time), or `LogAppendTime { millis }` (broker-assigned ingestion time), where
-  `millis` is milliseconds since the Unix epoch (the Kafka wire resolution).
-  `timestamp().millis() -> Option<i64>` gives the value regardless of kind.
+- `timestamp() -> Timestamp`: an enum that holds both the instant and its
+  kind. It is `NotAvailable`, `CreateTime { millis }` for producer-assigned
+  event time, or `LogAppendTime { millis }` for broker-assigned ingestion time,
+  where `millis` is milliseconds since the Unix epoch, the Kafka wire
+  resolution. `timestamp().millis() -> Option<i64>` gives the value regardless
+  of kind.
 - `headers() -> Headers`: an ordered, borrowed view of the record's headers.
 
 Kafka headers are a list, not a map: keys may repeat and wire order is preserved
@@ -155,19 +156,20 @@ because a lost message is unrecoverable and a duplicate is not.
 The consequence is a design rule: **make your processing idempotent**, so a
 redelivery is harmless. Concretely:
 
-- Key your writes by something stable in the record (an order id, an event id)
-  and use a conditional or upsert write, so applying the same record twice
-  lands the same final state as applying it once. An `INSERT ... ON CONFLICT DO
-  NOTHING`, a `PUT` to a content-addressed key, or a compare-and-set all work.
+- Key your writes by something stable in the record, such as an order id or an
+  event id, and use a conditional or upsert write, so applying the same record
+  twice lands the same final state as applying it once. An `INSERT ... ON
+  CONFLICT DO NOTHING`, a `PUT` to a content-addressed key, or a compare-and-set
+  all work.
 - Where you cannot make the write itself idempotent, keep a dedupe record: store
-  the record's id (or a hash of it) on first processing and skip a record whose
+  the record's id, or a hash of it, on first processing and skip a record whose
   id you have already seen. The dedupe store must be as durable as the effect
   you are guarding.
 - Treat an operation whose outcome you cannot tell apart after an interrupted
-  reply (a non-idempotent request, a bare `INSERT`) as not blindly retryable.
-  Guard it behind an idempotency key or a read-back check.
+  reply, such as a non-idempotent request or a bare `INSERT`, as not blindly
+  retryable. Guard it behind an idempotency key or a read-back check.
 
-A self-identifying payload helps: if the record carries its own id in the body
+A self-identifying payload helps: if the record contains its own id in the body
 as well as the key, a downstream consumer can dedupe on that id without trusting
 the delivery path.
 
@@ -195,7 +197,7 @@ In the default synchronous path, both are guaranteed for you.
 There is exactly one way to break this, and it is not a subtle mistake you can
 stumble into: you have to deliberately step around the design, by handing the
 work to another thread or task and returning before it finishes. The
-`tokio::spawn`-and-return shape is the archetype:
+`tokio::spawn`-and-return pattern is the archetype:
 
 ```rust,ignore
 // DO NOT DO THIS. It is an active workaround, not an accident: it compiles,
@@ -227,7 +229,7 @@ ruled out:
   at full speed, and lets the detached tasks pile up without bound. A slow
   downstream that should have slowed the consumer instead fills memory.
 
-If you are ever tempted, this litmus test is the check: **if the process lost
+If you are tempted, this litmus test is the check: **if the process lost
 power the instant `process` returned `Ok`, would this message be safe? If not,
 you returned too early.**
 
@@ -235,7 +237,7 @@ One nuance on why this needs stating at all, given how much the compiler already
 does for you: the borrow checker stops the naive version, because a slice
 borrowed from the message cannot escape into a `'static` spawned task, so that
 does not compile (the borrow rule from earlier on this page doing its job). What
-it cannot see is the `to_vec`-then-spawn shape above, because copying the bytes
+it cannot see is the `to_vec`-then-spawn pattern above, because copying the bytes
 out satisfies the borrow checker while still returning too early. That single gap
 is the whole reason this contract is written down rather than left entirely to the
 compiler.
@@ -282,7 +284,7 @@ inside a runtime.
 
 The instinct behind spawning is usually throughput, and in this engine that
 instinct is aimed at the wrong layer. You do not spawn to go faster here; you
-raise `concurrent_keys` (the engine tuning knob, default 250, documented in
+raise `concurrent_keys` (the engine tuning setting, default 250, documented in
 `docs/configuration.md`). The per-key workers are the concurrency: the engine
 already runs many keys at once, each in order. A spawn inside a handler builds a
 second, broken concurrency layer on top of the real one, buying nothing the
@@ -319,11 +321,11 @@ If you build with `panic = "abort"`, the safety net is gone: a handler panic
 aborts the whole process instead of dead-lettering one message. Keep the default
 `unwind` profile for any build that runs this engine.
 
-(One precise note for anyone reading trait bits: a Rust handler panic surfaces
+One precise note for anyone reading trait bits: a Rust handler panic is recorded
 as the ProcessError framework flag, the same flag a returned `Err` sets, because
 the panic is caught and converted at the boundary. The separate ProcessPanic
 flag is reserved for a panic the Go engine recovers inside its own callback,
-which would indicate a bug in the bridge rather than in your handler.)
+which would indicate a bug in the bridge rather than in your handler.
 
 ## When the dead-letter handler itself fails
 
@@ -392,7 +394,7 @@ The framework flags the engine sets, and what each means:
 | `has_first_after_rebalance` | 7 | The first message processed on its partition after a rebalance assignment |
 
 These framework bits describe each message's fate (was it buffered out of order,
-was it a duplicate, did a rebalance touch it). Where they surface for you to
+was it a duplicate, did a rebalance touch it). Where they appear for you to
 observe is narrower than you might expect, and worth stating plainly, because
 this crate feeds metrics internally and has no user-facing per-message metrics
 callback. Your only window onto them is the Prometheus output, and it shows five
@@ -401,11 +403,11 @@ of the framework conditions as counters: a process error (bit 0), a caught panic
 dispatch (bit 5). Each of those increments independently, so several can fire for
 one message, and a processed-total counter increments for every message
 regardless. The remaining framework bits (CommitBuffered, Orphaned,
-FirstAfterRebalance) have `has_*` getters but no metric, so they do not appear in
-the Prometheus output at all.
+FirstAfterRebalance) have `has_*` getters but no metric, so they do not appear
+in the Prometheus output.
 
 The sharp edge is the application bits. **The custom bits you set (positions 10
-to 63) surface nowhere in this crate's observability: not as counters, not as
+to 63) appear nowhere in this crate's observability: not as counters, not as
 labels.** The full 64-bit field does cross the FFI, but the metrics sink reads
 only the five framework predicates above, and with no per-message metrics
 callback there is nothing else that reads the field. So from your application's

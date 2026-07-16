@@ -25,7 +25,7 @@ type headerView struct {
 // marshalHeadersView runs marshalHeaders and immediately decodes the arena
 // back through the C struct layout, freeing it before returning: it proves
 // what a C ABI consumer of the array would read. The second return reports
-// whether an arena was allocated at all (false = nil pointer, zero count).
+// whether an arena was allocated (false = nil pointer, zero count).
 func marshalHeadersView(headers []bridgeHeader) ([]headerView, bool) {
 	arr, count, free := marshalHeaders(headers)
 	defer free()

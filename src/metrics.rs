@@ -4,7 +4,7 @@
 //! Baked-in Prometheus metrics: activation ([`Metrics`]), the per-message and
 //! bandwidth sinks, OpenMetrics rendering, and the built-in scrape endpoint.
 //!
-//! Everything here is always compiled in (this crate has no features);
+//! Everything here is always compiled in, since this crate has no features;
 //! configuration decides whether any of it runs. Two activation modes, one
 //! type:
 //!
@@ -43,9 +43,9 @@ use prometheus_client::metrics::histogram::{exponential_buckets, Histogram};
 use prometheus_client::registry::Registry;
 use tiny_http::{Header, Method, Response, Server};
 
-/// The `Content-Type` for the OpenMetrics text exposition, matching what Go's
-/// `promhttp` serves with `EnableOpenMetrics` (and what the reference
-/// scrapers expect). Use it when mounting [`MetricsHandle::scrape`] output on
+/// The `Content-Type` for the OpenMetrics text exposition, matching what
+/// Go's `promhttp` serves with `EnableOpenMetrics` and what the reference
+/// scrapers expect. Use it when mounting [`MetricsHandle::scrape`] output on
 /// your own HTTP stack.
 pub const OPENMETRICS_CONTENT_TYPE: &str =
     "application/openmetrics-text; version=1.0.0; charset=utf-8";
@@ -57,8 +57,8 @@ const MESSAGE_SUBSYSTEM: &str = "engine";
 /// Subsystem for the bandwidth series (metric names `llingr_bandwidth_*`).
 const BANDWIDTH_SUBSYSTEM: &str = "bandwidth";
 
-/// Compression fallback for a partition that reports no algorithm (the Go
-/// sink's empty-string to `"unknown"` mapping).
+/// Compression fallback for a partition that reports no algorithm: the Go
+/// sink's empty-string to `"unknown"` mapping.
 const UNKNOWN_COMPRESSION: &str = "unknown";
 
 /// Render a registry to the OpenMetrics text exposition format.
@@ -148,8 +148,8 @@ impl Metrics {
     /// both sinks, and either bind the built-in endpoint or publish the
     /// registry to the caller's handle.
     ///
-    /// Consumed by the engine builder; a serve-mode bind failure surfaces
-    /// here as the `io::Error` for the builder to report.
+    /// Consumed by the engine builder; a serve-mode bind failure is reported
+    /// here as the `io::Error` for the builder to return.
     pub(crate) fn realise(
         self,
         topic: &str,
@@ -242,8 +242,9 @@ impl std::fmt::Debug for MetricsHandle {
 
 /// The build-time product of [`Metrics::realise`]: the two sinks the engine
 /// registers as its metrics and bandwidth handlers, plus the running exporter
-/// in serve mode (held for the life of the engine; dropping it stops the
-/// server thread, which is exactly what a failed build's rollback wants).
+/// in serve mode. The exporter is held for the life of the engine; dropping
+/// it stops the server thread, which is exactly what a failed build's
+/// rollback wants.
 pub(crate) struct RealisedMetrics {
     pub(crate) message_sink: MessageSink,
     pub(crate) bandwidth_sink: BandwidthSink,
@@ -566,7 +567,7 @@ struct BrokerInfoLabels {
 
 /// Configuration for a [`BandwidthSink`].
 ///
-/// `topic` and `consumer_group` are taken from each packet (which carries
+/// `topic` and `consumer_group` are taken from each packet (which includes
 /// them), so only the service identity is configured here.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct BandwidthOptions {
@@ -854,7 +855,7 @@ impl Drop for ExporterHandle {
 
 impl std::fmt::Debug for ExporterHandle {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // `tiny_http::Server` is not `Debug`; surface just the bound address.
+        // `tiny_http::Server` is not `Debug`; show just the bound address.
         f.debug_struct("ExporterHandle")
             .field("local_addr", &self.local_addr)
             .finish_non_exhaustive()
@@ -1285,7 +1286,7 @@ mod bandwidth_tests {
         assert!(!text.contains("compressed_bytes_total{"), "{text}");
     }
 
-    /// The collection-timestamp gauge is set only when the packet carries a
+    /// The collection-timestamp gauge is set only when the packet includes a
     /// timestamp (Go: `!metrics.Ts.IsZero()`), and the interval gauge converts
     /// milliseconds to seconds.
     #[test]
@@ -1448,7 +1449,7 @@ mod activation_tests {
     }
 
     /// Serve mode: an unbindable address is a clean io::Error, for the engine
-    /// builder to surface at build time.
+    /// builder to return at build time.
     #[test]
     fn serve_mode_unbindable_address_is_an_error() {
         // Port 1 requires privileges; binding it as a normal user fails.

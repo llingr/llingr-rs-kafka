@@ -11,10 +11,9 @@
 //!     are never handed to the compiler.
 //!   - Every mirrored block is re-tagged `no_run` (unless it was `ignore` or
 //!     `compile_fail`), so `cargo test --doc` compiles it but never executes
-//!     it. This matters because the samples call the blocking `engine.run()`
-//!     against a broker; running them is wrong, compiling them is the point.
-//!     (`cargo test --doc --no-run` is rejected by cargo, hence forcing
-//!     `no_run` per block instead.)
+//!     it: the samples call the blocking `engine.run()` against a broker, so
+//!     running them is wrong and compiling them is the point. (`cargo test
+//!     --doc --no-run` is rejected by cargo, hence `no_run` per block.)
 //!
 //! Hidden setup lines (the rustdoc `# ` convention already used in the pages)
 //! and the implicit-main wrapping are handled by rustdoc itself, because the
@@ -32,8 +31,8 @@ fn main() {
         .to_path_buf();
 
     // Sources: README.md and the top-level docs/*.md pages. docs/internal/ is
-    // deliberately excluded: contributor notes may carry illustrative snippets
-    // that are not meant to compile.
+    // deliberately excluded: contributor notes may contain illustrative
+    // snippets that are not meant to compile.
     let mut sources: Vec<PathBuf> = Vec::new();
     let readme = repo.join("README.md");
     if readme.is_file() {
