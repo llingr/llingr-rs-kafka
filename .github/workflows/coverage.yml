@@ -45,7 +45,7 @@ jobs:
           tool: cargo-llvm-cov@0.8.7
       # One instrumented run: writes lcov and enforces the line floor. build.rs
       # is excluded (it is a build script, not exercised by the test binaries);
-      # the crate's dependencies and the separate example/, docs-examples/ and
+      # the crate's dependencies and the separate example/, docs/check-examples/ and
       # abi-check/ packages are not measured.
       - name: Coverage (lcov + gate)
         run: >

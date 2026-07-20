@@ -10,7 +10,7 @@ top of this lives in the `docs/` pages; here we are under the hood.
 llingr-kafka does not reimplement the engine. It embeds the actual Go
 llingr-demux engine and its franz-go broker layer, compiled together into a
 single static C archive (`libllingr.a`) with Go's `c-archive` build mode, and
-links that archive directly into your Rust binary. Rust exchanges data with it
+links that archive directly into the Rust binary. Rust exchanges data with it
 across a small, versioned C ABI. The consequence to internalise is that
 everything the engine guarantees in Go it guarantees here, because it is the
 same engine running unmodified: per-key ordering, contiguous gap-buffer offset
@@ -18,14 +18,16 @@ commits, drain-before-rebalance, and the at-least-once contract are not
 re-derived on the Rust side.
 
 This crate is deliberately one crate and one broker. There is no adapter
-abstraction and no shared-library variant: the franz-go path is unconditional
-and the archive links statically. That is what makes the deployable a single
-self-contained binary with no `.so` beside it.
+abstraction: the franz-go path is unconditional. By default the archive links
+statically, which is what makes the deployable a single self-contained binary
+with no `.so` beside it; the alternative side-binary mode (`LLINGR_LINK=shared`)
+links the same engine as a shared library deployed beside the binary, with the
+same FFI surface and the same ABI handshake.
 
 ```
 Kafka / RedPanda / MSK
     |
-Go engine, linked into your binary as a static c-archive (libllingr.a)
+Go engine, linked into the application binary as a static c-archive (libllingr.a)
     |   franz-go (pure Go) polls the broker
     |   -> llingr-demux pipeline: poll -> FNV-1a key route -> per-key workers
     |      -> gap-buffer offset committer -> broker commit

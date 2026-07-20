@@ -1,34 +1,23 @@
 version = 1
 
-# Bulk SPDX licensing for files that cannot have an in-file header: lockfiles,
-# Go module manifests, prose, and generated or structured files.
-#
-# Source files and build scripts have their own in-file headers and do not need
-# to be listed here: precedence = "closest" prioritises in-file headers.
+# Bulk SPDX licensing so config, lockfiles, manifests, prose, and Dockerfiles
+# need no in-file header. precedence = "closest" keeps any header a file does have.
 [[annotations]]
 path = [
     ".dockerignore",
-    ".fossa.yml",
     ".github/**",
     ".gitignore",
     "AUTHORS",
-    "CODE_OF_CONDUCT.md",
-    "CONTRIBUTING.md",
     "COPYRIGHT",
-    "Cargo.lock",
-    "abi-check/Cargo.lock",
-    "examples/e2e/Cargo.lock",
-    "README.md",
-    "SECURITY.md",
     "THIRD-PARTY-NOTICES",
-    "deny.toml",
-    "bridge/go.mod",
-    "bridge/go.sum",
-    "examples/e2e/**/go.mod",
-    "examples/e2e/**/go.sum",
-    "docs/**/*.md",
-    "examples/e2e/**/*.md",
-    "examples/README.md",
+    "**/Dockerfile",
+    "**/*.md",
+    "**/*.toml",
+    "**/*.lock",
+    "**/*.mod",
+    "**/*.sum",
+    "**/*.yml",
+    "**/*.yaml",
 ]
 precedence = "closest"
 SPDX-FileCopyrightText = "Copyright (c) 2026 The llingr-rs-kafka Authors"

@@ -158,7 +158,7 @@ redelivery is harmless. Concretely:
 
 - Key your writes by something stable in the record, such as an order id or an
   event id, and use a conditional or upsert write, so applying the same record
-  twice lands the same final state as applying it once. An `INSERT ... ON
+  twice yields the same final state as applying it once. An `INSERT ... ON
   CONFLICT DO NOTHING`, a `PUT` to a content-addressed key, or a compare-and-set
   all work.
 - Where you cannot make the write itself idempotent, keep a dedupe record: store

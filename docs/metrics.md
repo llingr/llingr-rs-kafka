@@ -44,11 +44,6 @@ each mode does:
   can mount the route unconditionally and it simply starts returning data once
   the engine is up.
 
-The engine wiring that realises the registry at build time (registering the
-sinks, binding the endpoint in serve mode) lands with the engine module; the
-metrics module itself, the sinks, the scrape rendering, and the `serve`/`registry`
-modes described here are complete in the crate today.
-
 ## Mounting the handle on your own server
 
 When you already run an HTTP server, use registry mode and serve the handle's

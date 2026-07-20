@@ -1,13 +1,11 @@
 # Engine configuration
 
-You tune the engine through `DemuxConfig`, a builder of thirteen typed settings
-covering worker concurrency, buffer sizes, and the engine's internal timeouts.
-The important thing to know first is that you rarely need it: every setting has an
-engine default chosen for production, and leaving `DemuxConfig` off the builder
-entirely runs on those defaults. Reach for it when you have a specific reason
-(measured throughput, a known burst pattern, an unusually slow downstream), not as
-a matter of course. This page gives every setting, its default, its units, and when
-changing it is warranted.
+Tune the llingr-demux engine using `DemuxConfig`, which contains settings covering
+workers concurrency, buffer sizes, and the engine's internal timeouts.
+
+This is rarely needed: every setting has a carefully chosen default, so include
+only when you want to boost concurrency beyond 250x (already two orders of magnitude
+faster), or in specialist runtimes.
 
 You pass a `DemuxConfig` to the builder's `.demux(...)` method:
 
@@ -29,31 +27,11 @@ let engine = Builder::new("orders", P, D)
 # }
 ```
 
-## How defaults and validation work
 
-The rules are uniform, so you can reason about any setting the same way:
-
-- **Unset means default.** Any setting you do not call keeps the engine's
-  production default. A `DemuxConfig::new()` with nothing set is identical to
-  passing no `DemuxConfig`.
-- **Zero means default, not error.** Passing `0` (or a zero `Duration`) to a
-  setting selects the engine default rather than failing, so a computed value that
-  happens to be zero degrades to the default instead of breaking startup. The
-  two exceptions are called out in the table: `commit_ingest_channel_len`, whose
-  explicit values must fall in a fixed range, and `worker_shards_count`, where
-  `1` is an error because shard counts must be a power of two of at least 2.
-- **Ranges are validated at `build()`.** An explicit value outside a setting's
-  range is a clean startup error (an `LlingrError` returned from `build()`),
-  never a panic or a crash. You find out immediately, with the reason, rather
-  than at runtime.
-- **Durations are millisecond-granular and round up.** Every `Duration`-valued
-  setting serialises to whole milliseconds, and a sub-millisecond remainder rounds
-  up, so a non-zero `Duration` never silently becomes zero.
-
-## The thirteen settings
+## Config Settings
 
 | Method | Engine default | Range | What it controls |
-|---|---|---|---|
+|----|---|---|---|
 | `concurrent_keys(u32)` | 250 | 1 to 5000 | Maximum number of concurrent per-key workers |
 | `per_key_buffer_len(u32)` | 16 | 1 to 64 | Per-worker channel buffer length |
 | `poll_timeout(Duration)` | 100ms | 20ms to 2s | Broker poll timeout |
@@ -129,21 +107,15 @@ the defaults handle well. Change them only in response to a specific, measured
 problem, and rely on the range validation at `build()` to catch a value that is
 out of bounds.
 
-## What DemuxConfig does not cover
+## Context: What is **Not** Covered
 
-`DemuxConfig` is engine tuning only. Two adjacent things live elsewhere, and two
-are deliberately not configurable:
+`DemuxConfig` is for engine tuning *only*, other settings include:
 
-- **Broker connection and Kafka client options**, meaning brokers, consumer
-  group, offset reset, timeouts, and security, are not `DemuxConfig`. They are
-  set with `.brokers(...)`, `.consumer_group(...)`, and the `Options` builder,
-  documented in `docs/kafka-options.md` and `docs/security.md`.
+- **Broker connection and Kafka client options**: brokers, consumer
+  group, offset reset, timeouts, and security, are set using `.brokers(...)`,
+  `.consumer_group(...)`, ... See the `Options` builder, documented in
+  `docs/kafka-options.md` and `docs/security.md`.
+
 - **Logging** has no configuration setting here by design: engine logs flow into
   the Rust `log` facade under the target `llingr`, and you configure verbosity
-  through your logger, for example `RUST_LOG=llingr=debug`, not through
-  `DemuxConfig`. See `docs/logging.md`. If you came here looking for a logger
-  setting, that is why there is none.
-- **Envelope extraction**, how a record's key, partition, and offset are read
-  from the broker message, is not exposed either: the crate uses the adapter's
-  canonical, UTF-8-safe extraction as-is, so there is no setting to change it. What
-  that extraction produces is described in `docs/processing.md`.
+  through your logger, for example `RUST_LOG=llingr=debug`, see `docs/logging.md`

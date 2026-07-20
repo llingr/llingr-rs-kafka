@@ -1,24 +1,11 @@
-# SPDX-FileCopyrightText: Copyright (c) 2026 The llingr-rs-kafka Authors
-# SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Llingr-Commercial
+# End-To-End Example
 #
-# The end-to-end proof, as a single compose stack on one network, secured with
-# SASL/SCRAM-SHA-256 over TLS (sasl_ssl). The consumer's exit code is the
-# verdict: 0 means the whole demux + franz + FFI + log + metrics chain worked
-# against a real, authenticated broker. `make example-verify` brings the stack
-# up detached (up -d), blocks on `docker wait` for the consumer container,
-# prints the logs, then tears down with `down -v`, preserving the consumer's
-# exit code. It deliberately does NOT use `--exit-code-from consumer`: that
-# implies `--abort-on-container-exit`, which tears the whole stack down the
-# instant a one-shot (cert-gen / init) exits, killing redpanda before the
-# consumer connects.
-#
-# Flow: cert-gen mints a throwaway CA + broker cert (SAN "redpanda") into a
-# volume; redpanda comes up with a sasl_ssl listener and reports healthy; init
-# creates the SCRAM-SHA-256 superuser via the admin API and the orders topic
-# (12 partitions) over sasl_ssl; the producer publishes 1000 order events over
-# sasl_ssl and exits; the consumer processes them, asserting the key ==
-# body.orderId invariant per message, and exits 0 once it has seen all 1000.
-# Certs and the SCRAM password live only in the volume/env, never committed.
+# Flow:
+#  - cert-gen creates CA + broker cert (SAN "redpanda") into a volume
+#  - redpanda comes up with a sasl_ssl listener and reports healthy
+#  - init creates the SCRAM-SHA-256 superuser via and the 'orders' topic
+#  - the producer publishes 1000 order events and exits
+#  - the consumer processes them, exits once it has seen all 1000.
 
 name: llingr-kafka-example
 
@@ -26,8 +13,7 @@ volumes:
   certs:
 
 services:
-  # One-shot: mint a self-signed CA + broker cert (SAN covers "redpanda") into
-  # the shared certs volume. Exits before redpanda starts.
+  # create self-signed CA + broker cert into the shared certs volume
   cert-gen:
     image: alpine/openssl:latest
     entrypoint: ["/bin/sh"]
@@ -45,12 +31,10 @@ services:
     volumes:
       - certs:/certs:ro
       - ./redpanda:/cfg:ro
-    # rpk rewrites redpanda.yaml at startup, so the config cannot be a read-only
-    # bind mount (rename-over-mount fails, "device busy"). Copy the configs into
-    # the container's writable /etc/redpanda first, then start. The sasl_ssl
-    # listener and its TLS live in redpanda.yaml (rpk's `redpanda start` has no
-    # --set flag); enable_sasl and the superuser are cluster config in
-    # .bootstrap.yaml.
+    # rpk rewrites redpanda.yaml during startup, so the config cannot be a read-only
+    # bind mount. Copy the configs into the container's writable /etc/redpanda before start.
+    # The sasl_ssl listener and its TLS live in redpanda.yaml enable_sasl and the superuser
+    # are cluster config in .bootstrap.yaml.
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
@@ -89,8 +73,8 @@ services:
 
   producer:
     build:
-      context: .
-      dockerfile: Dockerfile.producer
+      context: ./producer
+      dockerfile: Dockerfile
     depends_on:
       init:
         condition: service_completed_successfully
@@ -109,7 +93,7 @@ services:
   consumer:
     build:
       context: ../..
-      dockerfile: examples/e2e/Dockerfile.consumer
+      dockerfile: examples/e2e/Dockerfile
     depends_on:
       init:
         condition: service_completed_successfully

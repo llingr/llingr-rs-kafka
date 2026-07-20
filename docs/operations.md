@@ -41,7 +41,7 @@ abandons it uncommitted, so it is redelivered at least once on the next start.
 
 Two rules make `stop()` safe to reason about:
 
-- **A `stop()` that lands before `run()` has started consuming is ignored.**
+- **A `stop()` called before `run()` has started consuming is ignored.**
   There is nothing to stop yet, and the later `run()` remains fully stoppable.
   A shutdown signal that can arrive during startup should be re-checked once
   `run()` is underway, or you can simply exit the process.
@@ -250,7 +250,7 @@ scale a consumer group, by adding more group members.
 Two consequences follow from the runtime being resident:
 
 - **The engine keeps running until the process exits.** The engine is linked
-  statically into your binary, its goroutines and garbage collector run for the
+  statically into the application binary, its goroutines and garbage collector run for the
   process lifetime, and dropping the `Llingr` handle does not stop them. Use
   `stop()` to shut the engine down, not by dropping the handle.
 - **It is not fork-safe.** Do not `fork()` without a following `exec` after
@@ -258,9 +258,13 @@ Two consequences follow from the runtime being resident:
   in an inconsistent state. `std::process::Command` is fine: it does
   fork-plus-exec.
 
-Because the engine links statically, the binary is self-contained: there is no
-shared library to place beside it, no `rpath`, and no `LD_LIBRARY_PATH` to set.
-That is why it drops cleanly into a `scratch` container image.
+In the default packaging mode the engine links statically and the binary is
+self-contained: there is no shared library to place beside it, no `rpath`, and
+no `LD_LIBRARY_PATH` to set. That is why it drops cleanly into a `scratch`
+container image. In the side-binary mode (`LLINGR_LINK=shared`, see
+`docs/building-packaging.md`) the one operational addition is `libllingr.so`
+deployed beside the binary; RPATH resolves it, so there is still no
+`LD_LIBRARY_PATH` and no system install.
 
 ## Liveness
 
