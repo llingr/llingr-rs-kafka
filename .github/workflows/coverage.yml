@@ -34,6 +34,7 @@ jobs:
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version: '1.25'
+          cache-dependency-path: bridge/go.sum
       - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master 2026-07-15
         with:
           toolchain: stable
@@ -72,6 +73,7 @@ jobs:
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version: '1.25'
+          cache-dependency-path: bridge/go.sum
       # -coverpkg=./... keeps this to the bridge module's own packages; the
       # upstream engine modules are separate modules, measured in their own
       # repos. -race matches the Go house pattern (implies covermode=atomic).
