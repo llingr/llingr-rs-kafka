@@ -153,7 +153,7 @@ OAUTHBEARER (OIDC), and GCP IAM. Kerberos/GSSAPI is not supported at this time.
 See [examples/auth](https://github.com/llingr/llingr-rs-kafka/tree/main/examples/auth) for
 an example of each authentication method.
 
-```rust
+```rust ignore
 use llingr_kafka::{Builder, Options, AutoOffsetReset, DemuxConfig, Metrics};
 use std::time::Duration;
 

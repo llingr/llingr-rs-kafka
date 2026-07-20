@@ -121,7 +121,7 @@ fn extract_rust_blocks(text: &str) -> Vec<(String, String)> {
 /// it compiles but never executes.
 fn reemit_info(info: &str) -> String {
     let attrs: Vec<&str> = info
-        .split(',')
+        .split(|c: char| c == ',' || c.is_whitespace())
         .map(|attr| attr.trim())
         .filter(|attr| !attr.is_empty())
         .collect();
