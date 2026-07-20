@@ -5,8 +5,7 @@ three groups: build-time failures (something wrong while `cargo build` compiles
 the crate and its engine), initialisation failures (`Builder::build()` returns
 an error before the consumer runs), and runtime shutdowns (the engine stops and
 tells you why). Each error below is paired with its cause and what to do about
-it. Some exact error strings come from the Go engine and are marked where they
-firm up once the bridge lands in the repository.
+it.
 
 ## Build-time failures
 

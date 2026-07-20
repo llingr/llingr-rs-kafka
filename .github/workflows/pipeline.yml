@@ -71,7 +71,7 @@ jobs:
       actions: read
 
   # Compile-check every fenced `rust` sample in README.md and docs/*.md
-  # (docs-check.yml runs `cargo test --doc` over the docs-examples mirror, with
+  # (docs-check.yml runs `cargo test --doc` over the docs/check-examples mirror, with
   # no_run forced so the samples compile but never execute). Enabled now that the
   # engine module has landed and the samples compile against the real API.
   docs:

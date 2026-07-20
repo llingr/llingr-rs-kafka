@@ -3,14 +3,14 @@
 llingr-kafka gives a Rust application an ordered, per-key-concurrent Kafka
 consumer with the batteries already fitted. You implement one trait to process
 messages; the crate supplies the engine, the broker client, offset management,
-Prometheus metrics, and log routing, all compiled into your binary. There is
+Prometheus metrics, and log routing, all compiled into the application binary. There is
 one crate to depend on, one broker family to point it at (Apache Kafka and any
 Kafka-compatible broker such as RedPanda or Amazon MSK), and no runtime
 services to deploy alongside it.
 
 Underneath the safe Rust layer is the real llingr-demux engine. That engine
 is written in Go, has its offset and pipeline mechanisms formally verified with
-TLA+, and is compiled into a static C archive that links directly into your Rust
+TLA+, and is compiled into a static C archive that links directly into the Rust
 binary. Everything the engine guarantees in
 Go it guarantees here, because it is the same engine: per-key ordering,
 contiguous offset commits, drain-before-rebalance, and at-least-once delivery
@@ -46,10 +46,12 @@ Around that core the crate bundles the pieces a production consumer needs:
   they flow through whatever logger your application installed, whether
   env_logger or tracing through tracing-log, with no wiring. There is no logger
   parameter by design.
-- **A self-contained deployable**: the engine links statically, so the whole
+- **Two packaging modes**: by default the engine links statically, so the whole
   consumer is one binary with no shared library beside it and no
-  `LD_LIBRARY_PATH` to manage. It ships in a `scratch` container image of
-  roughly 16 MB.
+  `LD_LIBRARY_PATH` to manage, shipping in a `scratch` container image of
+  roughly 16 MB. Alternatively, build the engine once as a shared library
+  (`make engine LINK=shared`) and deploy it beside the binary, resolved by
+  RPATH and guarded by the startup ABI check.
 
 ## When to use it, and when not
 
@@ -146,7 +148,7 @@ rather than sending you elsewhere.
 | `docs/metrics.md` | The two Prometheus activation modes, the complete metric catalogue, bandwidth telemetry, and a worked example of mounting scrape output on your own server |
 | `docs/logging.md` | Engine logs through the `log` facade: the `llingr` target, the level mapping, and env_logger and tracing-log worked examples |
 | `docs/operations.md` | `run`/`stop`/`emergency_stop` semantics, the exactly-once shutdown callback, duplicate delivery after an emergency stop, snapshots (typed and JSON), signal handling, and the one-instance-per-process rule |
-| `docs/building-packaging.md` | Native and Docker builds, static linking, `LLINGR_LIB_DIR`, cross-compilation, scratch-image deployment, the THIRD-PARTY-NOTICES obligation, and musl status |
+| `docs/building-packaging.md` | Native and Docker builds, the two packaging modes (single static binary, and the shared-library side-binary via `LLINGR_LINK=shared`), `LLINGR_LIB_DIR`, cross-compilation, scratch-image deployment, the THIRD-PARTY-NOTICES obligation, and musl status |
 | `docs/example.md` | A walkthrough of the end-to-end example: what each piece proves and how to adapt it |
 | `docs/licensing.md` | The dual licence in plain terms: what AGPL-3.0-only means for a binary that embeds this crate, when the commercial licence applies, and who to contact |
 | `docs/troubleshooting.md` | The init-error catalogue, runtime failure modes, and what a shutdown reason tells you |
@@ -154,4 +156,4 @@ rather than sending you elsewhere.
 Contributor-facing notes live under `docs/internal/`: `ARCHITECTURE.md` covers
 the FFI boundary and how the Go engine embeds, `BUILDING.md` the build model and
 ABI discipline, and `MUSL.md` the parked-upstream musl record and the flip
-instructions for when it lands.
+instructions for when it is merged.

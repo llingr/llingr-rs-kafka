@@ -805,7 +805,7 @@ impl BandwidthMetricsHandler for BandwidthSink {
 }
 
 // ---------------------------------------------------------------------------
-// Built-in scrape endpoint (port of the Go-side exporter donor)
+// Built-in scrape endpoint
 // ---------------------------------------------------------------------------
 
 /// How often the serve loop wakes to check for a stop request. Bounds the

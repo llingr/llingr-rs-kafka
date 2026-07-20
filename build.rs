@@ -2,20 +2,30 @@
 // SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Llingr-Commercial
 
 // Builds the Go engine (bridge/) into a static c-archive during `cargo build`
-// and links it, so `cargo add llingr-kafka` is the whole integration story on
-// a machine with Go and Rust. Behaviour, in order (PLAN.md section 6):
+// and links it: on a machine with Go and Rust, `cargo add llingr-kafka` is the
+// complete integration. Behaviour, in order:
 //
-//   1. DOCS_RS set        -> emit nothing and return (docs builds have no
-//                            network and no Go toolchain).
-//   2. LLINGR_LIB_DIR set -> link the prebuilt libllingr.a found there and
-//                            skip Go entirely (CI caching, air-gapped hosts,
-//                            `make engine` consumers).
-//   3. otherwise          -> require Go 1.25+ on PATH, map the cargo target
-//                            to GOOS/GOARCH, and `go build` the bridge into
-//                            OUT_DIR as a c-archive.
+//   1. DOCS_RS set          -> emit nothing and return (docs builds have no
+//                              network and no Go toolchain).
+//   2. LLINGR_LINK=shared   -> link the prebuilt libllingr.so/.dylib in
+//                              LLINGR_LIB_DIR dynamically, with RPATH entries
+//                              so the binary finds the engine beside itself
+//                              at runtime. Never compiles the engine.
+//   3. LLINGR_LIB_DIR set   -> link the prebuilt libllingr.a found there and
+//                              skip Go entirely (CI caching, air-gapped hosts,
+//                              `make engine` consumers).
+//   4. otherwise            -> require Go 1.25+ on PATH, map the cargo target
+//                              to GOOS/GOARCH, and `go build` the bridge into
+//                              OUT_DIR as a c-archive.
 //
-// Static c-archive is the ONLY link mode: a single self-contained binary, no
-// .so-beside-binary story, and the mode closest to future musl support.
+// Two link modes, chosen by LLINGR_LINK. `static` (the default) statically links
+// the engine c-archive into the binary: a single self-contained executable, and
+// the mode closest to future musl support. `shared` is the side-binary mode:
+// the engine is a shared library built once (`make engine LINK=shared`) and
+// deployed beside the application binary, where the emitted RPATH
+// ($ORIGIN / @loader_path) resolves it with no ldconfig and no system
+// install. The ABI handshake (llingr_abi_version, checked at startup) is what
+// makes a swappable engine safe: a mismatched library refuses cleanly.
 // Docker is NEVER invoked from here: rust-analyzer runs build scripts
 // constantly, and CI sandboxes and docs.rs have no daemon; failure messages
 // name the Docker remedies instead.
@@ -27,10 +37,10 @@ fn main() {
     // Every environment variable that changes this script's behaviour MUST
     // be declared here: cargo fingerprints build-script runs and reuses the
     // cached output when nothing it tracks has changed. An untracked
-    // variable (the donor prototype omitted DOCS_RS) means a `DOCS_RS=1
-    // cargo check` poisons the cache and the next real build silently links
-    // nothing.
+    // variable means a `DOCS_RS=1 cargo check` poisons the cache and the
+    // next real build silently links nothing.
     println!("cargo:rerun-if-env-changed=LLINGR_LIB_DIR");
+    println!("cargo:rerun-if-env-changed=LLINGR_LINK");
     println!("cargo:rerun-if-env-changed=DOCS_RS");
     println!("cargo:rerun-if-env-changed=GOOS");
     println!("cargo:rerun-if-env-changed=GOARCH");
@@ -62,7 +72,21 @@ fn main() {
         return;
     }
 
-    // 2. Prebuilt engine: link it and skip Go entirely.
+    // 2. Side-binary mode: link the prebuilt shared engine dynamically.
+    match std::env::var("LLINGR_LINK").as_deref() {
+        Ok("shared") => {
+            emit_link_shared();
+            return;
+        }
+        Ok("static") | Err(_) => {}
+        Ok(other) => panic!(
+            "LLINGR_LINK must be `static` (the default) or `shared`, got `{other}`. \
+             `shared` links the engine as a libllingr.so/.dylib deployed beside the \
+             application binary; see docs/building-packaging.md."
+        ),
+    }
+
+    // 3. Prebuilt engine: link it and skip Go entirely.
     if let Ok(dir) = std::env::var("LLINGR_LIB_DIR") {
         let dir = PathBuf::from(&dir);
         // Resolve for a legible message; fall back to the raw path if it does
@@ -85,11 +109,11 @@ fn main() {
         return;
     }
 
-    // 3. Build the engine from bridge/ with the Go toolchain.
+    // 4. Build the engine from bridge/ with the Go toolchain.
 
     // The musl seam. A statically linked c-archive needs only the
     // golang/go#13492 fix, so this branch is the shortest path to musl once
-    // upstream lands it; until then, fail honestly. This message is one of
+    // upstream merges it; until then, fail honestly. This message is one of
     // three seams: keep its substance aligned with the Makefile's LIBC guard
     // and docker/Dockerfile, which contain the same canonical text.
     if std::env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("musl") {
@@ -200,6 +224,56 @@ fn main() {
     assert!(status.success(), "engine `go build` failed");
 
     emit_link(&out_dir);
+}
+
+// The side-binary link. The shared engine is a deployment artifact, built
+// once with `make engine LINK=shared`, so this mode never compiles it
+// implicitly: a binary linked against an engine hidden in cargo's OUT_DIR
+// would break the moment it is copied anywhere. Hence LLINGR_LIB_DIR is
+// required here, where in static mode it is optional.
+//
+// Two RPATH entries, in order: $ORIGIN (@loader_path on macOS) first, so the
+// deployed layout is "library beside the binary"; the absolute LLINGR_LIB_DIR
+// second, so `cargo test` and `cargo run` binaries under target/ resolve the
+// engine during development without copying it around. The Makefile stamps
+// the dylib's install name as @rpath/libllingr.dylib at link time, which is
+// what lets the macOS loader consult these RPATHs at all.
+fn emit_link_shared() {
+    let Ok(dir) = std::env::var("LLINGR_LIB_DIR") else {
+        panic!(
+            "LLINGR_LINK=shared requires LLINGR_LIB_DIR pointing at the prebuilt shared \
+             engine. Build it once with `make engine LINK=shared` (writes \
+             dist/<target-triple>/libllingr.so, .dylib on macOS), then set \
+             LLINGR_LIB_DIR=dist/<target-triple>."
+        );
+    };
+    let macos = std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("macos");
+    let lib = if macos {
+        "libllingr.dylib"
+    } else {
+        "libllingr.so"
+    };
+    let dir = PathBuf::from(&dir);
+    let resolved = dir.canonicalize().unwrap_or(dir);
+    // A warning, not an error, for the same reason as the static branch:
+    // `cargo check` and rust-analyzer must keep working before the library
+    // has been built.
+    if !resolved.join(lib).exists() {
+        println!(
+            "cargo::warning=LLINGR_LINK=shared but {lib} is not in {}: linking will fail \
+             with `ld: library 'llingr' not found`. Build it with `make engine \
+             LINK=shared` and point LLINGR_LIB_DIR at dist/<target-triple>/.",
+            resolved.display()
+        );
+    }
+    println!("cargo:rustc-link-search=native={}", resolved.display());
+    println!("cargo:rustc-link-lib=dylib=llingr");
+    let origin = if macos { "@loader_path" } else { "$ORIGIN" };
+    println!("cargo:rustc-link-arg=-Wl,-rpath,{origin}");
+    println!("cargo:rustc-link-arg=-Wl,-rpath,{}", resolved.display());
+    // No -lpthread/-lm/-ldl and no macOS frameworks here: the shared library
+    // records its own dependencies, unlike the static archive, which leaves
+    // them for the final link.
 }
 
 fn emit_link(dir: &Path) {

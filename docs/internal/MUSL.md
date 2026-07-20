@@ -2,7 +2,7 @@
 
 This note exists so nobody re-litigates or re-discovers why llingr-kafka is
 glibc-only today, and so that whoever picks up musl support when the upstream
-blocker lands knows exactly where the three seams are and how to flip them.
+blocker is merged knows exactly where the three seams are and how to flip them.
 Short version: musl is parked on an unmerged Go fix, not designed out. The crate
 is built so that enabling it later is a small, localised change, and every
 place that could hard-code the libc is parameterised and defaults to glibc.
@@ -64,7 +64,7 @@ This is verified, not theorised. The
 `llingr-rs-packaging-examples/rust/README.md` investigation ran the engine on
 musl in every link mode (dynamic, static, and static-pie) and recorded a
 segfault in Go's runtime init every time. The glibc build of the same code, in
-the same modes, runs fine. When the upstream fix lands and someone re-tests,
+the same modes, runs fine. When the upstream fix is merged and someone re-tests,
 that README is the record to update alongside this note.
 
 ## The seam: exactly three places, all defaulting to glibc
@@ -80,7 +80,7 @@ musl, you touch these three and only these three.
    includes both issue links: golang/go#13492 with fix PR #69325, and
    golang/go#48596 for the dlopen TLS blocker. A musl target therefore produces
    a clear build error rather than a binary that segfaults at start. When the
-   upstream fix lands, this branch becomes the CC and target-triple mapping for
+   upstream fix is merged, this branch becomes the CC and target-triple mapping for
    musl, exactly as the glibc branch maps the triple to `GOOS`/`GOARCH` and the
    C toolchain today.
 2. **`ARG LIBC` in `docker/Dockerfile`.** The builder image is

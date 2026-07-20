@@ -149,7 +149,7 @@ that mixes one-shot containers (`cert-gen`, `init`, `producer`) with a
 long-running one (`consumer`).
 
 Because the consumer's image builds the entire crate, including the Go bridge,
-inside the image (the static-scratch pattern in `examples/e2e/Dockerfile.consumer`),
+inside the image (the static-scratch pattern in `examples/e2e/Dockerfile`),
 `example-verify` also exercises the from-source Docker build path on every run,
 not just the runtime behaviour. The build and packaging mechanics behind that
 image are in `docs/building-packaging.md`.

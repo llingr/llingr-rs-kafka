@@ -6,10 +6,13 @@ the Makefile ties it together, and the ABI discipline you keep when you touch th
 boundary. The user-facing build and deployment guide is
 `docs/building-packaging.md`; this page is the mechanics behind it.
 
-Conceptually there are two artefacts. The Go engine compiles into a static C
-archive (`libllingr.a`), and the Rust crate links it. Unlike the older modular
-binding there is no shared library and no adapter matrix: one crate, the franz
-path only, static linking only.
+Conceptually there are two artefacts. The Go engine compiles into a C library,
+and the Rust crate links it. There is no adapter matrix: one crate, the franz
+path only. Two link modes exist, selected by `LLINGR_LINK`: the default statically links the archive (`libllingr.a`) into the
+binary; `shared` links a `libllingr.so`/`.dylib` built by `make engine
+LINK=shared` and deployed beside the binary, resolved through the emitted
+RPATH. The FFI surface is identical in both, and the `llingr_abi_version`
+handshake is what makes the swappable shared engine safe.
 
 ## What `build.rs` does, in order
 
@@ -19,15 +22,31 @@ behaviour, in order (the landed script is the source of truth):
 1. **`DOCS_RS` set: emit nothing and return.** A docs.rs build has no network
    and no Go toolchain, so the script compiles and links nothing. This is why
    `DOCS_RS=1 cargo doc --no-deps` succeeds with no Go present.
-2. **`LLINGR_LIB_DIR` set: link the prebuilt archive and skip Go entirely.** The
+2. **`LLINGR_LINK=shared`: link the prebuilt shared engine dynamically.** This
+   mode requires `LLINGR_LIB_DIR` (a hard error if unset: the shared engine is
+   a deployment artifact, and linking one hidden in `OUT_DIR` would break the
+   moment the binary is copied anywhere). The script emits `dylib=llingr` plus
+   two RPATH entries: `$ORIGIN` (`@loader_path` on macOS) for the deployed
+   library-beside-binary layout, then the absolute `LLINGR_LIB_DIR` so
+   `cargo test` binaries under `target/` resolve the engine during
+   development. No `-lpthread -lm -ldl` and no macOS frameworks here: the
+   shared library records its own dependencies. A missing library file is a
+   `cargo::warning`, not an error, for the same rust-analyzer reason as below.
+3. **`LLINGR_LIB_DIR` set: link the prebuilt archive and skip Go entirely.** The
    script links the `libllingr.a` found in that directory and does not invoke Go.
    If the file is not there it emits a `cargo::warning` (not an error, so `cargo
    check` and rust-analyzer keep working) naming the resolved path and pointing
    at `make engine`, which builds the archive into `dist/<target-triple>/`. This
    path serves CI caches, air-gapped hosts, and `make engine` consumers.
-3. **Otherwise: build the engine from `bridge/` with the Go toolchain.** The
+4. **Otherwise: build the engine from `bridge/` with the Go toolchain.** The
    script requires Go, maps the cargo target to `GOOS`/`GOARCH`, and runs `go
    build` to produce the archive in `OUT_DIR`.
+
+The Makefile's `LINK=shared` setting is the producer side of mode 2: it switches
+`make engine` to `-buildmode=c-shared`, and on macOS stamps the dylib's install
+name as `@rpath/libllingr.dylib` at link time (so no `install_name_tool` step
+that would invalidate the signature) and applies the ad-hoc code signature
+Apple Silicon requires.
 
 Docker is never invoked from `build.rs`. rust-analyzer runs build scripts
 constantly, and CI sandboxes and docs.rs have no daemon, so a `cargo build` stays
@@ -330,7 +349,7 @@ target rather than producing a binary that segfaults at start; the full record i
 in `docs/internal/MUSL.md`). If you are provisioning an image ahead of the
 upstream fix landing, the musl variant will additionally need the Rust `*-musl`
 target (`rustup target add ...-musl`) and a musl C toolchain (`musl-tools`, which
-provides `musl-gcc`). Until the fix lands, none of that helps: the build fails on
+provides `musl-gcc`). Until the fix is merged, none of that helps: the build fails on
 purpose.
 
 ### Verifying an image is correctly provisioned
@@ -348,7 +367,7 @@ Makefile section above for the full description.
 - **Linux, default (dynamic):** a glibc at least as new as the one the binary was
   built against, and nothing else (no librdkafka, no broker library).
 - **Linux, `crt-static`:** nothing; the binary is fully self-contained and
-  drops into a `scratch` or distroless image (see the scratch-image deployment in
+  deploys in a `scratch` or distroless image (see the scratch-image deployment in
   `docs/building-packaging.md`).
 - **macOS:** always a dynamic dependency on `libSystem` (plus the CoreFoundation
   and Security frameworks); there is no static option on macOS.
@@ -497,5 +516,4 @@ docs/                 you are here (docs/internal/ for contributor notes)
 
 The boundary modules (`src/ffi.rs`, `src/engine.rs`, `src/config.rs`,
 `src/trampolines.rs`, `src/snapshot.rs`), the Go composition root `bridge/`, and
-`abi-check/` were adapted from the llingr-rs donor working tree and are all
-present.
+`abi-check/` are all present.

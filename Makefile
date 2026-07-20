@@ -3,21 +3,29 @@
 #
 # Single entry point for building, testing, and exercising llingr-kafka. All the
 # incantations (cgo cross flags, buildmode, cache volumes, compose) live here so
-# a contributor only needs three knobs:
+# a contributor only needs four variables:
 #
 #   MODE    native | docker | auto   where the crate is built (default auto)
 #   LIBC    glibc  | musl             target libc (musl is not yet supported)
 #   PROFILE release | debug           optimisation level (default release)
+#   LINK    static | shared           engine artifact `make engine` produces
 #
 # MODE=auto builds natively when Go 1.25+, a C compiler, and cargo are all
 # present, otherwise it builds inside the Docker builder image
 # (docker/Dockerfile). Docker mode re-invokes the SAME make target with
 # MODE=native inside that image, so the native and docker paths run identical
 # commands and no build logic is duplicated.
+#
+# LINK=static (default) builds the c-archive that cargo statically links into a single
+# self-contained binary. LINK=shared builds the side-binary variant instead:
+# a shared libllingr.so (.dylib on macOS) deployed beside the application
+# binary and linked with LLINGR_LINK=shared (see build.rs and
+# docs/building-packaging.md).
 
 MODE    ?= auto
 LIBC    ?= glibc
 PROFILE ?= release
+LINK    ?= static
 
 .DEFAULT_GOAL := help
 
@@ -31,6 +39,9 @@ $(error PROFILE must be release or debug (got '$(PROFILE)'))
 endif
 ifeq ($(filter $(LIBC),glibc musl),)
 $(error LIBC must be glibc or musl (got '$(LIBC)'))
+endif
+ifeq ($(filter $(LINK),static shared),)
+$(error LINK must be static or shared (got '$(LINK)'))
 endif
 
 # musl seam, one of three with docker/Dockerfile and the *-musl branch in
@@ -73,14 +84,35 @@ GO_LDFLAGS         :=
 endif
 
 # Host target triple, used to name the engine output directory so a prebuilt
-# libllingr.a and LLINGR_LIB_DIR line up with what cargo links.
+# engine and LLINGR_LIB_DIR line up with what cargo links.
 TARGET_TRIPLE := $(shell rustc -vV 2>/dev/null | awk '/^host:/ {print $$2}')
+
+# Engine artifact and Go buildmode per LINK. The shared library gets an @rpath
+# install name on macOS at link time (so a binary linked against it resolves it
+# beside itself at runtime, with no install_name_tool step that would invalidate
+# the signature) and is then ad-hoc signed, which Apple Silicon requires.
+UNAME_S := $(shell uname -s)
+ifeq ($(LINK),shared)
+GO_BUILDMODE := c-shared
+ifeq ($(UNAME_S),Darwin)
+ENGINE_LIB    := libllingr.dylib
+GO_EXTLDFLAGS := -extldflags '-Wl,-install_name,@rpath/libllingr.dylib'
+else
+ENGINE_LIB    := libllingr.so
+GO_EXTLDFLAGS :=
+endif
+else
+GO_BUILDMODE  := c-archive
+ENGINE_LIB    := libllingr.a
+GO_EXTLDFLAGS :=
+endif
+GO_ALL_LDFLAGS := $(strip $(GO_LDFLAGS) $(GO_EXTLDFLAGS))
 
 # Coverage measures this crate's own first-party code only. build.rs is a build
 # script, not exercised by the test binaries, so it is kept out of the line
 # counts; the upstream engine modules live in other repos and the crate's
 # dependencies are excluded by cargo-llvm-cov by default. examples/e2e/,
-# docs-examples/ and abi-check/ are separate cargo packages and are not part of
+# docs/check-examples/ and abi-check/ are separate cargo packages and are not part of
 # this coverage run at all.
 COVERAGE_IGNORE := --ignore-filename-regex 'build\.rs'
 
@@ -108,7 +140,7 @@ define run-in-builder
 		-v $(CARGO_CACHE_VOLUME):/root/.cargo/registry \
 		-e GOCACHE=/go/.cache/go-build \
 		$(BUILDER_IMAGE) \
-		make $@ MODE=native LIBC=$(LIBC) PROFILE=$(PROFILE)
+		make $@ MODE=native LIBC=$(LIBC) PROFILE=$(PROFILE) LINK=$(LINK)
 endef
 
 .PHONY: toolchains engine build test lint docs-check coverage example example-up example-down example-verify clean help
@@ -126,9 +158,10 @@ toolchains:
 	@echo "  MODE=$(MODE) resolves to: $(RESOLVED_MODE)"
 	@echo "  LIBC=$(LIBC), PROFILE=$(PROFILE)"
 
-# Build libllingr.a on its own into dist/<triple>/, for LLINGR_LIB_DIR consumers
-# and CI caches. Ordinary `make build` does not need this: the crate build.rs
-# builds the engine itself.
+# Build the engine on its own into dist/<triple>/, for LLINGR_LIB_DIR consumers
+# and CI caches. LINK=static (default) produces libllingr.a; LINK=shared
+# produces the side-binary libllingr.so/.dylib. Ordinary `make build` does not
+# need this: the crate build.rs builds the engine itself.
 engine:
 ifeq ($(RESOLVED_MODE),docker)
 	$(run-in-builder)
@@ -136,9 +169,17 @@ else
 	@test -n "$(TARGET_TRIPLE)" || { echo "error: could not determine the host target triple (is rustc installed?)"; exit 1; }
 	@test -f bridge/go.mod || { echo "error: bridge/go.mod not found; the Go composition root has not landed yet"; exit 1; }
 	@mkdir -p dist/$(TARGET_TRIPLE)
-	cd bridge && CGO_ENABLED=1 go build -tags netgo -buildmode=c-archive $(if $(GO_LDFLAGS),-ldflags "$(GO_LDFLAGS)",) -o ../dist/$(TARGET_TRIPLE)/libllingr.a .
-	@echo "built dist/$(TARGET_TRIPLE)/libllingr.a"
+	cd bridge && CGO_ENABLED=1 go build -tags netgo -buildmode=$(GO_BUILDMODE) $(if $(GO_ALL_LDFLAGS),-ldflags "$(GO_ALL_LDFLAGS)",) -o ../dist/$(TARGET_TRIPLE)/$(ENGINE_LIB) .
+ifeq ($(LINK)/$(UNAME_S),shared/Darwin)
+	codesign -f -s - dist/$(TARGET_TRIPLE)/$(ENGINE_LIB)
+endif
+	@echo "built dist/$(TARGET_TRIPLE)/$(ENGINE_LIB)"
+ifeq ($(LINK),shared)
+	@echo "link it: LLINGR_LINK=shared LLINGR_LIB_DIR=dist/$(TARGET_TRIPLE) cargo build $(CARGO_PROFILE_FLAG)"
+	@echo "deploy $(ENGINE_LIB) beside the application binary (RPATH resolves it; see docs/building-packaging.md)"
+else
 	@echo "link it without rebuilding the engine: LLINGR_LIB_DIR=dist/$(TARGET_TRIPLE) cargo build $(CARGO_PROFILE_FLAG)"
+endif
 endif
 
 build:
@@ -200,16 +241,14 @@ else
 endif
 
 # Compile (do not run) every fenced `rust` sample in README.md and docs/*.md.
-# docs-examples/ mirrors them as no_run doctests (build.rs), so `cargo test
+# docs/check-examples/ mirrors them as no_run doctests (build.rs), so `cargo test
 # --doc` compiles them without executing. Identical command to the docs-check CI
-# job. NOTE: red until the engine module (Builder/Llingr/DemuxConfig/Options/
-# Metrics) lands, because the samples reference those types; the CI wiring in
-# pipeline.yml is deliberately left disabled until then.
+# job.
 docs-check:
 ifeq ($(RESOLVED_MODE),docker)
 	$(run-in-builder)
 else
-	cd docs-examples && cargo test --doc
+	cd docs/check-examples && cargo test --doc
 endif
 
 # Coverage over the crate's own Rust modules (src/*) and the Go bridge (bridge/*)
@@ -267,10 +306,10 @@ clean:
 	-docker rmi $(BUILDER_IMAGE)
 
 help:
-	@echo "llingr-kafka build. Variables: MODE=native|docker|auto  LIBC=glibc|musl  PROFILE=release|debug"
+	@echo "llingr-kafka build. Variables: MODE=native|docker|auto  LIBC=glibc|musl  PROFILE=release|debug  LINK=static|shared"
 	@echo ""
 	@echo "  make toolchains     - report go/cc/cargo/docker and what MODE=auto resolves to"
-	@echo "  make engine         - build dist/<triple>/libllingr.a alone (for LLINGR_LIB_DIR / CI cache)"
+	@echo "  make engine         - build dist/<triple>/libllingr.a alone (LINK=shared: libllingr.so/.dylib) for LLINGR_LIB_DIR / CI cache"
 	@echo "  make build          - build the crate (honours MODE/LIBC/PROFILE)"
 	@echo "  make test           - bridge go test, cargo test, abi-check build"
 	@echo "  make lint           - cargo fmt --check + clippy -D warnings (same as CI)"

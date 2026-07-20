@@ -7,7 +7,7 @@
 [workspace]
 
 [package]
-name = "docs-examples"
+name = "docs-check-examples"
 version = "0.0.0"
 edition = "2021"
 publish = false
@@ -16,7 +16,7 @@ license = "AGPL-3.0-only OR LicenseRef-Llingr-Commercial"
 [dependencies]
 # The crate under documentation: the samples call its real API by `path`, so a
 # sample that drifts from the API stops compiling.
-llingr-kafka = { path = ".." }
+llingr-kafka = { path = "../.." }
 
 # Crates the doc samples reference:
 #   env_logger::init(),
