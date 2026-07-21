@@ -1,0 +1,62 @@
+name: Release PR
+
+on:
+  push:
+    branches:
+      - main
+
+permissions: {}
+
+jobs:
+  release-pr:
+    # Maintains the rolling release PR: version bump from conventional
+    # commits (fix -> patch, feat -> minor, breaking -> major) plus
+    # changelog. Merging that PR is the release decision.
+    name: release PR
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    concurrency:
+      group: release-plz-pr
+      cancel-in-progress: false
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master 2026-07-15
+        with:
+          toolchain: stable
+      - uses: release-plz/action@2eb1d8bcb770b4c48ccfaad919734b38b51958c9 # v0.5.131
+        with:
+          command: release-pr
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}
+
+  tag:
+    # After the release PR merges, the crate version is ahead of the last
+    # tag; this pushes the matching v* tag, which fires release.yml (build,
+    # attest, GitHub release, crates.io publish). No-op on ordinary pushes.
+    name: push release tag
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    concurrency:
+      group: release-plz-tag
+      cancel-in-progress: false
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master 2026-07-15
+        with:
+          toolchain: stable
+      - uses: release-plz/action@2eb1d8bcb770b4c48ccfaad919734b38b51958c9 # v0.5.131
+        with:
+          command: release
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}

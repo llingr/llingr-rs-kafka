@@ -52,13 +52,7 @@ jobs:
     # GitHub release: the irreversible (yank-only) crates.io upload happens
     # last, only for a tag whose release built, attested, and published
     # cleanly.
-    #
-    # DISABLED (skipped, never failed) until the one-time bootstrap is done:
-    # crates.io requires a crate's first release to be published manually
-    # before a trusted publisher can be configured. Once the crate exists
-    # and the publisher is set up, delete the `if: false` line below.
     name: publish to crates.io
-    if: false
     needs: publish
     runs-on: ubuntu-latest
     timeout-minutes: 20
