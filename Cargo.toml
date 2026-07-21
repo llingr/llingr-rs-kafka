@@ -3,7 +3,7 @@
 
 [package]
 name = "llingr-kafka"
-version = "0.10.0"
+version = "0.10.1"
 edition = "2021"
 rust-version = "1.78"
 description = "The llingr concurrent message processing engine for Kafka"
