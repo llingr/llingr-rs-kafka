@@ -1,0 +1,12 @@
+[workspace]
+# release-plz only maintains the release PR (version bump + changelog) and
+# pushes the version tag when that PR merges. The tag fires release.yml,
+# which builds, attests, creates the GitHub release, and publishes to
+# crates.io via Trusted Publishing.
+publish = false
+git_release_enable = false
+git_tag_enable = true
+git_tag_name = "v{{ version }}"
+# The verification build compiles the Go engine; semver-checks would repeat
+# that on every push for little value on an FFI crate.
+semver_check = false
