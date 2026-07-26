@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 The llingr-rs-kafka Authors
 // SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Llingr-Commercial
 
-//! The llingr concurrent message processing engine with a Kafka broker,
-//! batteries included.
+//! Kafka / Redpanda per-key ordered, concurrent consumer engine for simpler,
+//! faster, event-driven systems.
 //!
 //! One pre-baked crate: the `llingr-demux` Go engine and its franz-go broker
 //! layer compile into your binary as a static c-archive during `cargo build`.

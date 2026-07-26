@@ -1,8 +1,15 @@
 # llingr-kafka
 
-A per-key ordered, concurrent Kafka consumer engine for Rust. This allows consumers to
-scale vertically as well as horizontally, significantly improve both latency and throughput,
-control broker/infrastructure costs, improve utilization and reduce operational complexity.
+[![Pipeline](https://github.com/llingr/llingr-rs-kafka/actions/workflows/pipeline.yml/badge.svg)](https://github.com/llingr/llingr-rs-kafka/actions/workflows/pipeline.yml)
+[![crates.io](https://img.shields.io/crates/v/llingr-kafka.svg)](https://crates.io/crates/llingr-kafka)
+[![docs.rs](https://img.shields.io/docsrs/llingr-kafka)](https://docs.rs/llingr-kafka)
+[![License](https://img.shields.io/badge/License-Dual_Commercial%2FAGPL--3.0-blue.svg)](LICENSE)
+[![MSRV](https://img.shields.io/crates/msrv/llingr-kafka)](Cargo.toml)
+
+A per-key ordered, concurrent Kafka / Redpanda message-processing engine that allows consumers
+to scale both horizontally AND vertically. This provides massive scaling headroom, improving
+throughput, latency, broker utilization, and reducing operational complexity and
+broker/infrastructure costs.
 
 Integration requires two traits:
 
@@ -11,14 +18,10 @@ Integration requires two traits:
 
 Prometheus metrics can be enabled with a builder argument.
 
-**Why**: Burst capacity and scaling headroom for event-driven systems. A conventional consumer
-processes each partition in serial, limiting concurrency to the partition count, and per-partition
-message stalls cause 'head of line blocking'. The llingr-kafka engine avoids this by routing
-each message (by partition key) to a dedicated in-memory channel. This preserves per-key ordering
-while allowing a single partition to fan out into hundreds/thousands of concurrent workers.
+**Features**: Burst capacity and massive scaling headroom for event-driven systems. A conventional consumer processes each partition in serial, limiting concurrency to the broker's physical partition count, and per-partition message stalls cause 'head of line blocking'. The llingr-kafka engine avoids this by routing each message (by partition key) to a dedicated in-memory channel. This preserves per-key ordering while allowing a single partition to fan out into hundreds/thousands of concurrent workers.
 
 Coupled with a consumer-per-partition - for example with a consumer instance on each of twelve
-partitions - concurrency can be increased 2-3 orders of magnitude beyond conventional deployments
+partitions - concurrency can be increased 3 orders of magnitude beyond conventional deployments
 using default settings, and 4-5 orders of magnitude in more specialised scenarios the config
 already supports.
 
