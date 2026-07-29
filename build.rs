@@ -30,7 +30,7 @@
 // makes a swappable engine safe: a mismatched library refuses cleanly.
 // Docker is NEVER invoked from here: rust-analyzer runs build scripts
 // constantly, and CI sandboxes and docs.rs have no daemon; failure messages
-// name the Docker remedies instead.
+// name the Docker options instead.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -309,16 +309,17 @@ fn emit_link(dir: &Path) {
 }
 
 fn require_go_1_25() {
-    const REMEDIES: &str = "llingr-kafka compiles its Go engine during `cargo build`. Three \
-         remedies: (1) install Go 1.25+ from https://go.dev/dl/, (2) build the engine once \
-         with `make engine` (uses Docker) and set LLINGR_LIB_DIR=dist/<target-triple>, or \
-         (3) build the whole application inside the provided builder image \
-         (docker/Dockerfile).";
+    const OPTIONS: &str = "llingr-kafka compiles its Go engine during `cargo build`. Four \
+         options: (1) install Go 1.25+ from https://go.dev/dl/, (2) download a prebuilt engine \
+         from https://github.com/llingr/llingr-rs-kafka/releases and set LLINGR_LIB_DIR to the \
+         extracted directory, (3) build the engine once with `make engine` (uses Docker) and \
+         set LLINGR_LIB_DIR=dist/<target-triple>, or (4) build the whole application inside \
+         the provided builder image (docker/Dockerfile).";
 
     let out = Command::new("go")
         .arg("version")
         .output()
-        .unwrap_or_else(|_| panic!("Go toolchain not found on PATH. {REMEDIES}"));
+        .unwrap_or_else(|_| panic!("Go toolchain not found on PATH. {OPTIONS}"));
     let text = String::from_utf8_lossy(&out.stdout);
     // "go version go1.25.0 linux/arm64"
     let ver = text
@@ -331,6 +332,6 @@ fn require_go_1_25() {
     let minor: u32 = parts.next().unwrap_or("0").parse().unwrap_or(0);
     assert!(
         major > 1 || (major == 1 && minor >= 25),
-        "Go 1.25+ is required for the engine build, found {ver}. {REMEDIES}"
+        "Go 1.25+ is required for the engine build, found {ver}. {OPTIONS}"
     );
 }

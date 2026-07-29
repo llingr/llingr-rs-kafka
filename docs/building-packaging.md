@@ -221,8 +221,8 @@ so the deployed pair works anywhere it is copied as a unit, and the absolute
 is no `ldconfig`, no `LD_LIBRARY_PATH`, and no system install.
 
 In this mode the engine is a versioned build artifact, not something
-`cargo build` compiles: `LLINGR_LIB_DIR` is required, and the build fails with
-the remedy if it is unset. Replacing the deployed library with another engine
+`cargo build` compiles: `LLINGR_LIB_DIR` is required (the build will advise if
+it is unset). Replacing the deployed library with another engine
 build is safe against silent mismatch, because the crate calls
 `llingr_abi_version` at startup and refuses to run against a library built for
 a different FFI contract.
