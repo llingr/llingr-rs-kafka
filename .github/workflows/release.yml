@@ -37,8 +37,9 @@ jobs:
           pattern: engine-*
           merge-multiple: true
 
+      # Every asset: SHA256SUMS is the only file here not named llingr-*.
       - name: Checksums
-        run: sha256sum llingr-engine-*.tar.gz > SHA256SUMS
+        run: sha256sum llingr-* > SHA256SUMS
 
       - name: Create GitHub release
         env:
@@ -58,12 +59,8 @@ jobs:
           SHA256SUMS
 
   publish-crate:
-    # crates.io publish via Trusted Publishing (OIDC): no long-lived API
-    # token; crates.io mints a short-lived token for this repo + workflow +
-    # environment (one-time publisher setup on crates.io). Gated on the
-    # GitHub release: the irreversible (yank-only) crates.io upload happens
-    # last, only for a tag whose release built, attested, and published
-    # cleanly.
+    # Trusted Publishing (OIDC): crates.io mints a short-lived token for this
+    # repo, workflow and environment. Runs last because the upload is yank-only.
     name: publish to crates.io
     needs: publish
     runs-on: ubuntu-latest
@@ -77,27 +74,22 @@ jobs:
         with:
           persist-credentials: false
 
-      # cargo publish runs a verification build, and this crate's build.rs
-      # compiles the Go engine bridge via cgo, so Go must be on PATH; the
-      # runner already provides a C compiler.
+      # cargo publish runs a verification build, which compiles the Go bridge.
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version: '1.25'
           cache-dependency-path: bridge/go.sum
 
-      # crates.io publishes are irreversible (yank-only): refuse to proceed
-      # when the pushed tag does not match the crate version.
       - name: Check crate version matches tag
         run: |
-          # pkgid yields "...#name@x.y.z" (or "...#x.y.z" when the package
-          # and directory names match); the trailing cut handles both.
+          # pkgid yields "...#name@x.y.z" or "...#x.y.z"; the cuts handle both.
           crate_version=$(cargo pkgid | cut -d'#' -f2 | cut -d'@' -f2)
           test "v${crate_version}" = "${GITHUB_REF_NAME}" || {
             echo "crate version ${crate_version} does not match tag ${GITHUB_REF_NAME}"
             exit 1
           }
 
-      # Full packaging + verification build BEFORE any token is minted.
+      # Full verification build before any token is minted.
       - name: Publish dry run
         run: cargo publish --dry-run --locked
 

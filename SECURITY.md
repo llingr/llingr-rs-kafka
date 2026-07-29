@@ -6,8 +6,8 @@ Please do not open a public issue for vulnerabilities.
 ## Release integrity
 
 Release assets are built by a trusted-builder workflow that holds signing
-permissions and no write access to the repository. Each carries a build
-provenance attestation naming the workflow, commit and runner behind it:
+permissions and no write access to the repository. Each has a build provenance
+attestation naming the workflow, commit and runner behind it:
 
 ```sh
 gh attestation verify <asset> --repo llingr/llingr-rs-kafka \
