@@ -66,6 +66,29 @@ failure message names three remedies, the same three in the user docs:
 3. Build the whole application inside the provided builder image
    (`docker/Dockerfile`).
 
+## Testing a change against a consumer project
+
+Changes to `build.rs`, and to the `cargo::metadata` values dependents read as
+`DEP_LLINGR_*`, only show up in a project that depends on the crate. The trap is
+which copy of the crate that project builds.
+
+`cargo package` extracts the crate to `target/package/<name>-<version>/` during
+its verification build, so `--no-verify` leaves whatever that directory already
+held. A consumer pointed at it with a path dependency then compiles a stale
+`build.rs`, and the symptom is a change that appears to have no effect at all
+rather than an error.
+
+Point the consumer at the repository root instead, which always reflects the
+working tree:
+
+```toml
+[dependencies]
+llingr-kafka = { path = "/path/to/llingr-rs-kafka" }
+```
+
+Use `target/package/<name>-<version>/` only to check what was actually
+published, and refresh it with a full `cargo package` first.
+
 ## Platforms and toolchains
 
 llingr-kafka builds on Linux and macOS, and a build has to line up three things

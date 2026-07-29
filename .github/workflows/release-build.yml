@@ -9,12 +9,22 @@ name: Release build
 
 on:
   workflow_call:
+  # TEMPORARY, remove once the engines matrix has run green: exercises it from a
+  # branch without cutting a tag or reaching crates.io. The push trigger works
+  # from the branch itself; workflow_dispatch only appears in the UI once this
+  # file is on the default branch.
+  workflow_dispatch:
+  push:
+    branches: ['engine-artifacts-test']
 
 permissions:
   contents: read
 
 jobs:
   build:
+    # Tag-only: the version check and the source archive below both key off the
+    # tag name, so this job has nothing to compare against on a branch.
+    if: startsWith(github.ref, 'refs/tags/')
     name: build & attest
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -117,5 +127,97 @@ jobs:
           path: |
             llingr-rs-kafka-${{ github.ref_name }}.*
             llingr-kafka-*.crate
+          if-no-files-found: error
+          retention-days: 1
+
+  engines:
+    # Prebuilt engines for LLINGR_LIB_DIR consumers: CI, containers, and hosts
+    # without a Go toolchain. Each archive holds both link modes for one triple.
+    name: engine ${{ matrix.triple }}
+    runs-on: ${{ matrix.runner }}
+    # manylinux_2_28 pins the Linux glibc floor at 2.28. Building on the stock
+    # runner (2.39) would exclude Amazon Linux 2023, RHEL 9 and Raspberry Pi OS.
+    container: ${{ matrix.container }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - triple: x86_64-unknown-linux-gnu
+            runner: ubuntu-24.04
+            container: quay.io/pypa/manylinux_2_28_x86_64
+          - triple: aarch64-unknown-linux-gnu
+            runner: ubuntu-24.04-arm
+            container: quay.io/pypa/manylinux_2_28_aarch64
+          - triple: aarch64-apple-darwin
+            runner: macos-15
+          - triple: x86_64-apple-darwin
+            runner: macos-15-intel
+    steps:
+      # The container image ships a git that refuses a repo owned by another
+      # uid, which is what checkout produces.
+      - name: Trust the workspace
+        if: matrix.container != ''
+        run: git config --global --add safe.directory '*'
+
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version: '1.25'
+          cache-dependency-path: bridge/go.sum
+
+      # These builds are native, so a runner that isn't the target triple would
+      # silently mislabel the archive.
+      - name: Check the runner matches the target triple
+        run: |
+          case "$(uname -sm)" in
+            "Linux x86_64")  host=x86_64-unknown-linux-gnu ;;
+            "Linux aarch64") host=aarch64-unknown-linux-gnu ;;
+            "Darwin arm64")  host=aarch64-apple-darwin ;;
+            "Darwin x86_64") host=x86_64-apple-darwin ;;
+            *) echo "unrecognised host $(uname -sm)"; exit 1 ;;
+          esac
+          test "${host}" = "${{ matrix.triple }}" || {
+            echo "runner host ${host} is not ${{ matrix.triple }}"
+            exit 1
+          }
+
+      # MODE=native: the default `auto` would delegate to the docker builder.
+      # TARGET_TRIPLE is passed rather than derived, so the engine needs only
+      # Go and a C compiler here, no Rust toolchain.
+      - name: Build both link modes
+        run: |
+          make engine MODE=native LINK=static TARGET_TRIPLE=${{ matrix.triple }}
+          make engine MODE=native LINK=shared TARGET_TRIPLE=${{ matrix.triple }}
+
+      # LICENSE and THIRD-PARTY-NOTICES travel with the binary: README.md
+      # requires the notices to be shipped alongside for franz-go's BSD-3-Clause.
+      - name: Archive
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          dir="llingr-engine-${version}-${{ matrix.triple }}"
+          mkdir "${dir}"
+          cp dist/${{ matrix.triple }}/libllingr.* "${dir}/"
+          cp LICENSE THIRD-PARTY-NOTICES "${dir}/"
+          tar -czf "${dir}.tar.gz" "${dir}"
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-path: llingr-engine-*-${{ matrix.triple }}.tar.gz
+
+      # One artifact name per leg: upload-artifact rejects repeated names.
+      - name: Upload engine archive
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: engine-${{ matrix.triple }}
+          path: llingr-engine-*-${{ matrix.triple }}.tar.gz
           if-no-files-found: error
           retention-days: 1

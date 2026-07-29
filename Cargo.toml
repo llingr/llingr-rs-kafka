@@ -3,40 +3,40 @@
 
 [package]
 name = "llingr-kafka"
-version = "0.10.2"
+version = "0.10.3"
 edition = "2021"
 rust-version = "1.78"
 description = "Kafka / Redpanda per-key ordered concurrent consumer engine for simpler, faster, event-driven systems"
 license = "AGPL-3.0-only OR LicenseRef-Llingr-Commercial"
 repository = "https://github.com/llingr/llingr-rs-kafka"
 homepage = "https://llingr.io"
+documentation = "https://docs.rs/llingr-kafka"
 readme = "README.md"
-keywords = ["kafka", "message-processing", "concurrent", "streaming", "redpanda"]
-categories = ["api-bindings", "concurrency", "network-programming"]
+keywords = ["kafka", "redpanda", "events", "concurrent", "consumer"]
+categories = ["api-bindings", "concurrency", "network-programming", "external-ffi-bindings", "asynchronous"]
 # The Go engine links as a native static library named `llingr`; `links`
 # declares that so cargo refuses two crates claiming the same native library
 # in one dependency graph (one engine instance per process is a hard rule).
 links = "llingr"
-# The published package contains sources + bridge/ + LICENSE/NOTICES only.
-exclude = [
-    "Makefile",
-    "dist/",
-    "examples/e2e/",
-    ".github/",
-    "abi-check/",
-    "docker/",
-    "docs/",
-    "deny.toml",
-    ".fossa.yml",
-    "REUSE.toml",
-    "LICENSES/",
-    "gen-third-party-notices.sh",
-    "CODE_OF_CONDUCT.md",
-    "CONTRIBUTING.md",
-    "SECURITY.md",
-    ".gitignore",
-    ".dockerignore",
+# Published package: sources + bridge/ + LICENSE/NOTICES.
+include = [
+    "src/**",
+    "bridge/*.go",
+    "bridge/go.mod",
+    "bridge/go.sum",
+    "examples/README.md",
+    "examples/auth/**",
+    "build.rs",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE",
+    "THIRD-PARTY-NOTICES",
+    "release-plz.toml",
 ]
+
+# Any glibc target builds; musl will fail in build.rs; Windows is not supported.
+[package.metadata.docs.rs]
+targets = ["x86_64-unknown-linux-gnu"]
 
 # Pre-baked means pre-baked: no cargo features, every capability always
 # compiled in, activation is runtime configuration.

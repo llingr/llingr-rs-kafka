@@ -1,9 +1,11 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 The llingr-rs-kafka Authors
 // SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Llingr-Commercial
 
-// Builds the Go engine (bridge/) into a static c-archive during `cargo build`
-// and links it: on a machine with Go and Rust, `cargo add llingr-kafka` is the
-// complete integration. Behaviour, in order:
+//! Builds the Go engine (bridge/) into a static c-archive during `cargo build`
+//! and links it: on a machine with Go and Rust, `cargo add llingr-kafka` is the
+//! complete integration.
+
+// Behaviour, in order:
 //
 //   1. DOCS_RS set          -> emit nothing and return (docs builds have no
 //                              network and no Go toolchain).
@@ -271,6 +273,13 @@ fn emit_link_shared() {
     let origin = if macos { "@loader_path" } else { "$ORIGIN" };
     println!("cargo:rustc-link-arg=-Wl,-rpath,{origin}");
     println!("cargo:rustc-link-arg=-Wl,-rpath,{}", resolved.display());
+    // cargo scopes rustc-link-arg to this package's own targets, so the two
+    // rpaths above never reach a dependent's binary and it dies at startup with
+    // `no LC_RPATH's found`. Publish the values a dependent's build script
+    // needs to emit them itself; see docs/building-packaging.md.
+    println!("cargo::metadata=link=shared");
+    println!("cargo::metadata=lib_dir={}", resolved.display());
+    println!("cargo::metadata=rpath_origin={origin}");
     // No -lpthread/-lm/-ldl and no macOS frameworks here: the shared library
     // records its own dependencies, unlike the static archive, which leaves
     // them for the final link.
@@ -279,6 +288,10 @@ fn emit_link_shared() {
 fn emit_link(dir: &Path) {
     println!("cargo:rustc-link-search=native={}", dir.display());
     println!("cargo:rustc-link-lib=static=llingr");
+    // Dependents read these as DEP_LLINGR_LINK / DEP_LLINGR_LIB_DIR. Static
+    // needs no rpath, so a dependent's build script can branch on link.
+    println!("cargo::metadata=link=static");
+    println!("cargo::metadata=lib_dir={}", dir.display());
     // Go runtime C dependencies; after libllingr on the link line.
     println!("cargo:rustc-link-arg=-lpthread");
     println!("cargo:rustc-link-arg=-lm");

@@ -39,6 +39,7 @@ command -v go >/dev/null 2>&1 || { echo "error: a Go toolchain is required"; exi
 # Resolve to absolute paths before the cd below.
 OUT="$(cd "$(dirname "$OUT")" && pwd)/$(basename "$OUT")"
 BRIDGE="$(cd "$BRIDGE" && pwd)"
+LICENCE_FILE="$(cd "$(dirname "$0")" && pwd)/LICENSE"
 GOMODCACHE="$(go env GOMODCACHE)"
 
 # Third-party modules whose packages are compiled into the c-archive. `go list
@@ -68,12 +69,11 @@ escape() {
   echo "==================="
   echo ""
   echo "llingr-kafka statically links the llingr message-processing engine (Go),"
-  echo "so every binary built from this crate embeds the Go modules listed below."
-  echo "Their licences are reproduced verbatim. GENERATED from the bridge source"
-  echo "(go list -deps) by gen-third-party-notices.sh; do not edit by hand. The"
-  echo "llingr components (github.com/llingr/*) are covered by the repository"
-  echo "LICENSE and are not repeated here. Distribute this file alongside any"
-  echo "binary built from this crate."
+  echo "so every binary built from this crate embeds the llingr components and the"
+  echo "Go modules listed below. All licences are reproduced verbatim, llingr's"
+  echo "own first. GENERATED from the bridge source (go list -deps) by"
+  echo "gen-third-party-notices.sh; do not edit by hand. This file is self"
+  echo "contained: distribute it alongside any binary built from this crate."
   echo ""
   echo "Embedded third-party modules:"
   printf '%s\n' "$modules" | sed 's/^/  - /'
@@ -89,6 +89,11 @@ emit_section() { # $1 = heading, $2 = file to append verbatim
     cat "$2"
   } >> "$OUT"
 }
+
+# llingr's own terms lead, so a recipient of this file alone has the licence
+# governing the binary, not only its dependencies.
+[ -f "$LICENCE_FILE" ] || { echo "error: $LICENCE_FILE not found"; exit 1; }
+emit_section "github.com/llingr/*  (llingr-kafka and the llingr engine)" "$LICENCE_FILE"
 
 for module_at_version in $modules; do
   module="${module_at_version%@*}"
