@@ -9,9 +9,12 @@ run-name: "Pipeline (${{ github.event_name == 'pull_request' && format('PR #{0}'
 # PR, held behind those cheap checks so a cheap failure skips the heavy work.
 
 on:
-  # Every branch push (not tags: those fall through to release.yml).
+  # Every branch push except release-plz's, which runs on its pull_request only
+  # (tags fall through to release.yml).
   push:
-    branches: ['**']
+    branches:
+      - '**'
+      - '!release-plz-**'
   pull_request:
 
 permissions:
