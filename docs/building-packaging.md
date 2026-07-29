@@ -117,7 +117,7 @@ The engine is downloaded rather than compiled, so a Rust toolchain is the only
 requirement. Run from the project root.
 
 ```sh
-version=0.10.4
+version=0.10.6
 archive=llingr-engine-${version}-x86_64-unknown-linux-gnu   # or another platform
 
 curl -fsSLO "https://github.com/llingr/llingr-rs-kafka/releases/download/v${version}/${archive}.tar.gz"
@@ -249,10 +249,10 @@ toolchains.
 Each archive supports both [link modes](#packaging-modes): the static archive for
 linking into a single binary, and the shared library for deploying beside it.
 
-- **`llingr-engine-0.10.4-x86_64-unknown-linux-gnu.tar.gz`** - Intel and AMD Linux
-- **`llingr-engine-0.10.4-aarch64-unknown-linux-gnu.tar.gz`** - AWS Graviton, Ampere, 64-bit Raspberry Pi etc.
-- **`llingr-engine-0.10.4-aarch64-apple-darwin.tar.gz`** - Apple Silicon
-- **`llingr-engine-0.10.4-x86_64-apple-darwin.tar.gz`** - Intel Macs
+- **`llingr-engine-0.10.6-x86_64-unknown-linux-gnu.tar.gz`** - Intel and AMD Linux
+- **`llingr-engine-0.10.6-aarch64-unknown-linux-gnu.tar.gz`** - AWS Graviton, Ampere, 64-bit Raspberry Pi etc.
+- **`llingr-engine-0.10.6-aarch64-apple-darwin.tar.gz`** - Apple Silicon
+- **`llingr-engine-0.10.6-x86_64-apple-darwin.tar.gz`** - Intel Macs
 
 The Linux archives should run on any OS with glibc 2.17 or later (RHEL 7, Amazon
 Linux etc.). Alpine/musl is not currently supported; see the musl status section
@@ -282,7 +282,7 @@ Run this from the project root:
 
 ```sh
 # Fetch the artifact into the project
-version=0.10.4
+version=0.10.6
 archive=llingr-engine-${version}-x86_64-unknown-linux-gnu   # pick from the list above
 base=https://github.com/llingr/llingr-rs-kafka/releases/download/v${version}
 
