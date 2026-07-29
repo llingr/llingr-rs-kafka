@@ -12,14 +12,17 @@ it.
 **"Go toolchain not found on PATH" or "Go 1.25+ is required for the engine
 build".** llingr-kafka compiles its Go engine during `cargo build`, so the build
 needs Go 1.25 or newer (and a C compiler for cgo). The build script fails with
-one of these messages and names three remedies, and any one of them fixes it:
+one of these messages and names four options, any of which fixes it:
 
 1. Install Go 1.25 or newer (from `https://go.dev/dl/`) and a C compiler, then
    `cargo build` compiles the engine from source.
-2. Build the engine once with `make engine` (which can use Docker) and set
+2. Download a prebuilt engine for the platform from the
+   [releases](https://github.com/llingr/llingr-rs-kafka/releases) and set
+   `LLINGR_LIB_DIR` to the extracted directory. No toolchain is involved.
+3. Build the engine once with `make engine` (which can use Docker) and set
    `LLINGR_LIB_DIR=dist/<target-triple>`, so `cargo build` links the prebuilt
    archive and skips Go entirely.
-3. Build the whole application inside the provided builder image
+4. Build the whole application inside the provided builder image
    (`docker/Dockerfile`), so the machine needs only Docker.
 
 The full build model is in `docs/building-packaging.md`.

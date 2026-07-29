@@ -51,19 +51,21 @@ Apple Silicon requires.
 Docker is never invoked from `build.rs`. rust-analyzer runs build scripts
 constantly, and CI sandboxes and docs.rs have no daemon, so a `cargo build` stays
 deterministic; when Go is missing the script fails with a message naming the
-Docker remedies rather than silently shelling out.
+Docker options rather than silently shelling out.
 
-## The Go toolchain requirement and the three remedies
+## The Go toolchain requirement and the four build options
 
 The from-source path requires **Go 1.25 or newer** on `PATH`. `build.rs` runs
 `go version`, parses it, and fails if Go is absent or older than 1.25. The
-failure message names three remedies, the same three in the user docs:
+failure message names four options:
 
 1. Install Go 1.25 or newer (and a C compiler), so `cargo build` compiles the
    engine from source.
-2. Build the engine once with `make engine` (which can use Docker) and set
+2. Download a prebuilt engine from the GitHub release and set `LLINGR_LIB_DIR`
+   to the extracted directory.
+3. Build the engine once with `make engine` (which can use Docker) and set
    `LLINGR_LIB_DIR=dist/<target-triple>`.
-3. Build the whole application inside the provided builder image
+4. Build the whole application inside the provided builder image
    (`docker/Dockerfile`).
 
 ## Testing a change against a consumer project

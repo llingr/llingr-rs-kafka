@@ -196,13 +196,17 @@ Dockerfiles, cross-compilation, and the full decision detail:
 
 `cargo build` compiles the engine from the bundled Go source on first build,
 fetching the pinned Go modules. The build script does not shell out to Docker,
-so if Go is missing, the build fails with an error naming three remedies:
+so if Go is missing, the build fails with an error naming four options:
 
 1. **Install Go 1.25+** (and a C compiler); `cargo build` does the rest.
-2. **Use a prebuilt engine**: `make engine` (builds in Docker when Go is
-   absent), then `LLINGR_LIB_DIR=dist/<target-triple> cargo build` links the
+2. **Download a prebuilt engine** for the platform from the
+   [releases](https://github.com/llingr/llingr-rs-kafka/releases), then
+   `LLINGR_LIB_DIR=<extracted dir> cargo build`. No toolchain beyond Rust, and
+   each archive holds both link modes with its licences and SBOM.
+3. **Build a prebuilt engine locally**: `make engine` (builds in Docker when Go
+   is absent), then `LLINGR_LIB_DIR=dist/<target-triple> cargo build` links the
    archive and skips Go entirely. Suits CI caches and air-gapped builds.
-3. **Build everything in the provided image** (`docker/Dockerfile`, Go + Rust
+4. **Build everything in the provided image** (`docker/Dockerfile`, Go + Rust
    included): the machine needs only Docker.
 
 `make toolchains` reports what is installed and what the build will do;
