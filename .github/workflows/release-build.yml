@@ -1,30 +1,18 @@
 name: Release build
 
-# Trusted builder (SLSA Build L3 pattern): builds the release assets and
-# signs the attestations. Runs only via workflow_call from release.yml.
-# Holds signing permissions but NO contents:write; the caller's publish
-# job is the inverse. Verify with:
+# Trusted builder (SLSA Build L3): builds and signs the release assets.
+# Signing permissions, no contents:write. Verify with:
 #   gh attestation verify <asset> --repo llingr/llingr-rs-kafka \
 #     --signer-workflow llingr/llingr-rs-kafka/.github/workflows/release-build.yml
 
 on:
   workflow_call:
-  # TEMPORARY, remove once the engines matrix has run green: exercises it from a
-  # branch without cutting a tag or reaching crates.io. The push trigger works
-  # from the branch itself; workflow_dispatch only appears in the UI once this
-  # file is on the default branch.
-  workflow_dispatch:
-  push:
-    branches: ['engine-artifacts-test']
 
 permissions:
   contents: read
 
 jobs:
   build:
-    # Tag-only: the version check and the source archive below both key off the
-    # tag name, so this job has nothing to compare against on a branch.
-    if: startsWith(github.ref, 'refs/tags/')
     name: build & attest
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -32,14 +20,18 @@ jobs:
       contents: read
       id-token: write
       attestations: write
+    # Licences: syft reads them from the Go module cache, or the proxy. File
+    # components are dropped, being named by absolute runner path.
+    env:
+      SYFT_GOLANG_SEARCH_LOCAL_MOD_CACHE_LICENSES: 'true'
+      SYFT_GOLANG_SEARCH_REMOTE_LICENSES: 'true'
+      SYFT_FILE_METADATA_SELECTION: none
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
 
-      # cargo package runs a verification build, and this crate's build.rs
-      # compiles the Go engine bridge (go build -buildmode=c-archive) via cgo,
-      # so Go must be on PATH; the runner already provides a C compiler.
+      # cargo package runs a verification build, which compiles the Go bridge.
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version: '1.25'
@@ -51,19 +43,15 @@ jobs:
 
       - name: Check crate version matches tag
         run: |
-          # pkgid yields "...#name@x.y.z" (or "...#x.y.z" when the package
-          # and directory names match); the trailing cut handles both.
+          # pkgid yields "...#name@x.y.z" or "...#x.y.z"; the cuts handle both.
           crate_version=$(cargo pkgid | cut -d'#' -f2 | cut -d'@' -f2)
           test "v${crate_version}" = "${GITHUB_REF_NAME}" || {
             echo "crate version ${crate_version} does not match tag ${GITHUB_REF_NAME}"
             exit 1
           }
 
-      # The .crate file is byte-identical to what `cargo publish` uploads,
-      # so the attestation below covers the artifact crates.io users get.
-      # Packaged before anything writes to the working directory: cargo
-      # refuses to package a tree it considers dirty, and the steps below
-      # drop their outputs at the repository root.
+      # Byte-identical to what cargo publish uploads. Packaged first: cargo
+      # refuses a dirty tree, and later steps write to the repository root.
       - name: Package crate
         run: |
           cargo package --locked
@@ -79,9 +67,8 @@ jobs:
       - name: Install syft
         uses: anchore/sbom-action/download-syft@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
 
-      # Scanned from the unpacked .crate: the working tree also holds the e2e
-      # harness, abi-check and docs lockfiles, none of which ship. The crate
-      # carries Cargo.lock and bridge/go.mod, so one pass covers both graphs.
+      # The working tree also holds the e2e harness, abi-check and docs
+      # lockfiles, none of which ship. The crate includes both dependency graphs.
       - name: Unpack the crate for scanning
         run: |
           mkdir -p sbom-src
@@ -111,9 +98,7 @@ jobs:
             llingr-rs-kafka-${{ github.ref_name }}.tar.gz
             llingr-kafka-*.crate
 
-      # Ship the provenance bundle as a release asset too. The attestation
-      # already lives in GitHub's store (gh attestation verify); attaching it
-      # makes the provenance discoverable and verifiable next to the tarball.
+      # Also in GitHub's attestation store; this puts it beside the tarball.
       - name: Attach provenance bundle
         run: cp "${{ steps.attest.outputs.bundle-path }}" "llingr-rs-kafka-${GITHUB_REF_NAME}.tar.gz.sigstore"
 
@@ -135,18 +120,23 @@ jobs:
           retention-days: 1
 
   engines:
-    # Prebuilt engines for LLINGR_LIB_DIR consumers: CI, containers, and hosts
-    # without a Go toolchain. Each archive holds both link modes for one triple.
+    # One archive per platform, both link modes, for LLINGR_LIB_DIR consumers.
     name: engine ${{ matrix.triple }}
     runs-on: ${{ matrix.runner }}
-    # manylinux_2_28 pins the Linux glibc floor at 2.28. Building on the stock
-    # runner (2.39) would exclude Amazon Linux 2023, RHEL 9 and Raspberry Pi OS.
+    # manylinux_2_28 pins the Linux glibc floor at 2.28.
     container: ${{ matrix.container }}
     timeout-minutes: 30
     permissions:
       contents: read
       id-token: write
       attestations: write
+    # Licences: build info includes versions only, so syft reads them from the
+    # Go module cache, or the proxy. File components are dropped, being named
+    # by absolute runner path.
+    env:
+      SYFT_GOLANG_SEARCH_LOCAL_MOD_CACHE_LICENSES: 'true'
+      SYFT_GOLANG_SEARCH_REMOTE_LICENSES: 'true'
+      SYFT_FILE_METADATA_SELECTION: none
     strategy:
       fail-fast: false
       matrix:
@@ -166,8 +156,7 @@ jobs:
             runner: macos-15-intel
             libext: dylib
     steps:
-      # The container image ships a git that refuses a repo owned by another
-      # uid, which is what checkout produces.
+      # The image's git refuses a repo owned by another uid.
       - name: Trust the workspace
         if: matrix.container != ''
         run: git config --global --add safe.directory '*'
@@ -181,8 +170,7 @@ jobs:
           go-version: '1.25'
           cache-dependency-path: bridge/go.sum
 
-      # These builds are native, so a runner that isn't the target triple would
-      # silently mislabel the archive.
+      # Native builds: a mismatched runner would mislabel the archive.
       - name: Check the runner matches the target triple
         run: |
           case "$(uname -sm)" in
@@ -197,9 +185,8 @@ jobs:
             exit 1
           }
 
-      # MODE=native: the default `auto` would delegate to the docker builder.
-      # TARGET_TRIPLE is passed rather than derived, so the engine needs only
-      # Go and a C compiler here, no Rust toolchain.
+      # MODE=native builds here rather than in the docker builder. Passing
+      # TARGET_TRIPLE keeps the requirement to Go and a C compiler.
       - name: Build both link modes
         run: |
           make engine MODE=native LINK=static TARGET_TRIPLE=${{ matrix.triple }}
@@ -208,8 +195,8 @@ jobs:
       - name: Install syft
         uses: anchore/sbom-action/download-syft@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
 
-      # Build info from the library itself, so this lists the modules linked in
-      # rather than what go.mod requires. One Go build backs both link modes.
+      # The library's own build info lists the modules linked in. One Go build
+      # backs both link modes.
       - name: Generate engine SBOM (syft)
         run: >
           syft file:dist/${{ matrix.triple }}/libllingr.${{ matrix.libext }}
@@ -218,8 +205,7 @@ jobs:
           --source-supplier "Llingr Software Ltd"
           -o "cyclonedx-json=llingr-engine.cdx.json"
 
-      # LICENSE and THIRD-PARTY-NOTICES travel with the binary: README.md
-      # requires the notices to be shipped alongside for franz-go's BSD-3-Clause.
+      # franz-go's BSD-3-Clause requires the notices to ship with the binary.
       - name: Archive
         run: |
           version="${GITHUB_REF_NAME#v}"
