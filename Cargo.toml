@@ -3,7 +3,7 @@
 
 [package]
 name = "llingr-kafka"
-version = "0.10.3"
+version = "0.10.4"
 edition = "2021"
 rust-version = "1.78"
 description = "Kafka / Redpanda per-key ordered concurrent consumer engine for simpler, faster, event-driven systems"
