@@ -79,13 +79,17 @@ jobs:
       - name: Install syft
         uses: anchore/sbom-action/download-syft@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
 
-      # syft reads Cargo.lock natively and emits both SBOM formats. Note: this
-      # SBOM covers the Rust crate graph only; the Go modules linked statically
-      # into user binaries are recorded separately in THIRD-PARTY-NOTICES.
+      # Scanned from the unpacked .crate: the working tree also holds the e2e
+      # harness, abi-check and docs lockfiles, none of which ship. The crate
+      # carries Cargo.lock and bridge/go.mod, so one pass covers both graphs.
+      - name: Unpack the crate for scanning
+        run: |
+          mkdir -p sbom-src
+          tar -xzf llingr-kafka-*.crate -C sbom-src
+
       - name: Generate CycloneDX SBOM (syft)
         run: >
-          syft dir:.
-          --exclude './.github/**'
+          syft dir:sbom-src
           --source-name llingr-rs-kafka
           --source-version "${GITHUB_REF_NAME}"
           --source-supplier "Llingr Software Ltd"
@@ -93,8 +97,7 @@ jobs:
 
       - name: Generate SPDX SBOM (syft)
         run: >
-          syft dir:.
-          --exclude './.github/**'
+          syft dir:sbom-src
           --source-name llingr-rs-kafka
           --source-version "${GITHUB_REF_NAME}"
           --source-supplier "Llingr Software Ltd"
@@ -114,10 +117,11 @@ jobs:
       - name: Attach provenance bundle
         run: cp "${{ steps.attest.outputs.bundle-path }}" "llingr-rs-kafka-${GITHUB_REF_NAME}.tar.gz.sigstore"
 
+      # Bound to the .crate: the artifact the SBOM describes.
       - name: Attest SBOM
         uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
         with:
-          subject-path: llingr-rs-kafka-${{ github.ref_name }}.tar.gz
+          subject-path: llingr-kafka-*.crate
           sbom-path: llingr-rs-kafka-${{ github.ref_name }}.cdx.json
 
       - name: Upload release assets
@@ -150,13 +154,17 @@ jobs:
           - triple: x86_64-unknown-linux-gnu
             runner: ubuntu-24.04
             container: quay.io/pypa/manylinux_2_28_x86_64
+            libext: so
           - triple: aarch64-unknown-linux-gnu
             runner: ubuntu-24.04-arm
             container: quay.io/pypa/manylinux_2_28_aarch64
+            libext: so
           - triple: aarch64-apple-darwin
             runner: macos-15
+            libext: dylib
           - triple: x86_64-apple-darwin
             runner: macos-15-intel
+            libext: dylib
     steps:
       # The container image ships a git that refuses a repo owned by another
       # uid, which is what checkout produces.
@@ -197,6 +205,19 @@ jobs:
           make engine MODE=native LINK=static TARGET_TRIPLE=${{ matrix.triple }}
           make engine MODE=native LINK=shared TARGET_TRIPLE=${{ matrix.triple }}
 
+      - name: Install syft
+        uses: anchore/sbom-action/download-syft@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+
+      # Build info from the library itself, so this lists the modules linked in
+      # rather than what go.mod requires. One Go build backs both link modes.
+      - name: Generate engine SBOM (syft)
+        run: >
+          syft file:dist/${{ matrix.triple }}/libllingr.${{ matrix.libext }}
+          --source-name llingr-engine
+          --source-version "${GITHUB_REF_NAME#v}"
+          --source-supplier "Llingr Software Ltd"
+          -o "cyclonedx-json=llingr-engine.cdx.json"
+
       # LICENSE and THIRD-PARTY-NOTICES travel with the binary: README.md
       # requires the notices to be shipped alongside for franz-go's BSD-3-Clause.
       - name: Archive
@@ -205,13 +226,19 @@ jobs:
           dir="llingr-engine-${version}-${{ matrix.triple }}"
           mkdir "${dir}"
           cp dist/${{ matrix.triple }}/libllingr.* "${dir}/"
-          cp LICENSE THIRD-PARTY-NOTICES "${dir}/"
+          cp LICENSE THIRD-PARTY-NOTICES llingr-engine.cdx.json "${dir}/"
           tar -czf "${dir}.tar.gz" "${dir}"
 
       - name: Attest build provenance
         uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
         with:
           subject-path: llingr-engine-*-${{ matrix.triple }}.tar.gz
+
+      - name: Attest SBOM
+        uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
+        with:
+          subject-path: llingr-engine-*-${{ matrix.triple }}.tar.gz
+          sbom-path: llingr-engine.cdx.json
 
       # One artifact name per leg: upload-artifact rejects repeated names.
       - name: Upload engine archive

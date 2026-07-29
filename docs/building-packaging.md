@@ -117,7 +117,7 @@ The engine is downloaded rather than compiled, so a Rust toolchain is the only
 requirement. Run from the project root.
 
 ```sh
-version=0.10.3
+version=0.10.4
 archive=llingr-engine-${version}-x86_64-unknown-linux-gnu   # or another platform
 
 curl -fsSLO "https://github.com/llingr/llingr-rs-kafka/releases/download/v${version}/${archive}.tar.gz"
@@ -249,17 +249,19 @@ toolchains.
 Each archive supports both [link modes](#packaging-modes): the static archive for
 linking into a single binary, and the shared library for deploying beside it.
 
-- **`llingr-engine-0.10.3-x86_64-unknown-linux-gnu.tar.gz`** - Intel and AMD Linux
-- **`llingr-engine-0.10.3-aarch64-unknown-linux-gnu.tar.gz`** - AWS Graviton, Ampere, 64-bit Raspberry Pi etc.
-- **`llingr-engine-0.10.3-aarch64-apple-darwin.tar.gz`** - Apple Silicon
-- **`llingr-engine-0.10.3-x86_64-apple-darwin.tar.gz`** - Intel Macs
+- **`llingr-engine-0.10.4-x86_64-unknown-linux-gnu.tar.gz`** - Intel and AMD Linux
+- **`llingr-engine-0.10.4-aarch64-unknown-linux-gnu.tar.gz`** - AWS Graviton, Ampere, 64-bit Raspberry Pi etc.
+- **`llingr-engine-0.10.4-aarch64-apple-darwin.tar.gz`** - Apple Silicon
+- **`llingr-engine-0.10.4-x86_64-apple-darwin.tar.gz`** - Intel Macs
 
 The Linux archives should run on any OS with glibc 2.17 or later (RHEL 7, Amazon
 Linux etc.). Alpine/musl is not currently supported; see the musl status section
 below. Windows is not supported.
 
 Each library artifact includes `libllingr.h`, `LICENSE` and
-`THIRD-PARTY-NOTICES`, which must ship with any binary built using it.
+`THIRD-PARTY-NOTICES`, which must ship with any binary built using it, plus
+`llingr-engine.cdx.json`, a CycloneDX SBOM of every Go module linked into the
+library.
 
 Use the archive matching the crate version in `Cargo.toml`. A mismatch fails the
 startup `llingr_abi_version` check.
@@ -280,7 +282,7 @@ Run this from the project root:
 
 ```sh
 # Fetch the artifact into the project
-version=0.10.3
+version=0.10.4
 archive=llingr-engine-${version}-x86_64-unknown-linux-gnu   # pick from the list above
 base=https://github.com/llingr/llingr-rs-kafka/releases/download/v${version}
 
@@ -288,8 +290,10 @@ curl -fsSLO "${base}/${archive}.tar.gz"
 curl -fsSLO "${base}/SHA256SUMS"
 shasum -a 256 -c SHA256SUMS --ignore-missing
 
-# Optional: confirm the archive came from the release workflow, not a mirror.
+# Optional: confirm the archive and its SBOM came from the release workflow.
 gh attestation verify "${archive}.tar.gz" --repo llingr/llingr-rs-kafka
+gh attestation verify "${archive}.tar.gz" --repo llingr/llingr-rs-kafka \
+  --predicate-type https://cyclonedx.org/bom
 
 mkdir -p vendor
 tar -xzf "${archive}.tar.gz"
