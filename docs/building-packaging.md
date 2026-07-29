@@ -6,23 +6,31 @@ deployed beside it.
 
 ## Packaging modes
 
-|  | Single binary (default) | Side-binary (`LLINGR_LINK=shared`) |
-|---|---|---|
-| Artifact | one self-contained executable | your binary plus `libllingr.so`/`.dylib` beside it |
-| Engine linkage | static `libllingr.a`, built and linked by `cargo build` | shared library built once, resolved at runtime via RPATH |
-| Deployment | copy one file; `scratch` images work | copy two files; needs a glibc base image (a dynamic binary needs a loader) |
-| Engine updates | rebuild the application | replace the library file; the ABI check at startup refuses a mismatched engine |
-| Choose it when | you want the smallest artifact and deployment footprint | the engine is managed as its own versioned artifact, or several binaries share one engine build |
+Either mode links an engine compiled during `cargo build`, which needs the
+[required toolchain](#required-toolchain), or a
+[prebuilt binary artifact](#prebuilt-llingr-kafka-binary-artifacts-from-a-github-release).
 
-Both modes build the same engine from the same source, so the toolchain and
-examples below apply to both. The rest of this page describes the single-binary
-mode unless it says otherwise; the side-binary mode has
-[its own section](#side-binary-mode-a-shared-engine-beside-the-binary).
+### Single binary (default)
+
+- **Artifact** - a single self-contained executable
+- **Engine linking** - static `libllingr.a`, built and linked by `cargo build`
+- **Deployment** - copy one file; works on any Docker `scratch` image
+- **Engine updates** - rebuild the application
+
+### Side-binary (`LLINGR_LINK=shared`)
+
+- **Artifact** - the application binary plus `libllingr.so`/`.dylib` beside it
+- **Engine linking** - shared library, resolved at runtime using RPATH
+- **Deployment** - two files; needs OS with glibc because the binary needs a loader
+- **Engine updates** - replace the library file; an ABI startup check confirms compatibility
+
+Both modes use the same engine. The majority of this page describes the single-binary mode
+unless stated otherwise.
 
 ## Required Toolchain
 
-Supported platforms are Linux with glibc for runtime environments, and macOS more
-typical for development; Windows and Alpine Linux packaging is not currently provided. 
+Supported platforms are Linux with glibc for runtime environments, and macOS which is more
+typical for development; Windows and Alpine Linux packaging is not currently supported.
 
 - **Rust toolchain** - 2021 / MSRV 1.78+
 - **C compiler** - compiles CGO interfaces linking the engine into Rust binaries
@@ -103,13 +111,37 @@ COPY --from=build /app /app
 ENTRYPOINT ["/app"]
 ```
 
+### Prebuilt binary artifact / any platform
+
+The engine is downloaded rather than compiled, so a Rust toolchain is the only
+requirement. Run from the project root.
+
+```sh
+version=0.10.3
+archive=llingr-engine-${version}-x86_64-unknown-linux-gnu   # or another platform
+
+curl -fsSLO "https://github.com/llingr/llingr-rs-kafka/releases/download/v${version}/${archive}.tar.gz"
+mkdir -p vendor .cargo
+tar -xzf "${archive}.tar.gz"
+mv "${archive}" vendor/llingr-engine
+
+cat >> .cargo/config.toml <<'EOF'
+[env]
+LLINGR_LIB_DIR = { value = "vendor/llingr-engine", relative = true }
+EOF
+```
+
+`cargo build --release` then works as normal. Checksums, attestation, the
+platform list and side-binary mode are in
+[Prebuilt llingr-kafka binary artifacts](#prebuilt-llingr-kafka-binary-artifacts-from-a-github-release).
+
 --------------------------------------------------------------------------
 
 # Detail
 
 The build script chooses its behaviour from two environment variables:
 `LLINGR_LINK` selects the link mode (`static`, the default, or `shared`), and
-`LLINGR_LIB_DIR` points at a prebuilt engine. In static mode with no
+`LLINGR_LIB_DIR` points at a pre-built engine. In static mode with no
 `LLINGR_LIB_DIR`, `cargo build` compiles the engine from the bundled Go source;
 with `LLINGR_LIB_DIR` set it links the prebuilt `libllingr.a` there and skips
 Go entirely. In shared mode `LLINGR_LIB_DIR` is required and names the
@@ -177,8 +209,8 @@ export LLINGR_LIB_DIR=/path/to/dist/<target-triple>
 cargo build --release
 
 # 3. Deploy the library beside the binary:
-#   order-processor/
-#   |- order-processor    # the application binary
+#   my-application/
+#   |- my-application     # the application binary
 #   |- libllingr.so       # the engine, beside it
 ```
 
@@ -208,6 +240,132 @@ because a dynamically linked binary needs a loader. It gives you an engine that
 several binaries can share, application rebuilds that never touch the Go
 toolchain, and engine updates by file replacement plus restart rather than an
 application rebuild.
+
+## Prebuilt llingr-kafka binary artifacts from a GitHub release
+
+Prebuilt binary artifacts are provided for major platforms and require no special
+toolchains.
+
+Each archive supports both [link modes](#packaging-modes): the static archive for
+linking into a single binary, and the shared library for deploying beside it.
+
+- **`llingr-engine-0.10.3-x86_64-unknown-linux-gnu.tar.gz`** - Intel and AMD Linux
+- **`llingr-engine-0.10.3-aarch64-unknown-linux-gnu.tar.gz`** - AWS Graviton, Ampere, 64-bit Raspberry Pi etc.
+- **`llingr-engine-0.10.3-aarch64-apple-darwin.tar.gz`** - Apple Silicon
+- **`llingr-engine-0.10.3-x86_64-apple-darwin.tar.gz`** - Intel Macs
+
+The Linux archives should run on any OS with glibc 2.17 or later (RHEL 7, Amazon
+Linux etc.). Alpine/musl is not currently supported; see the musl status section
+below. Windows is not supported.
+
+Each library artifact includes `libllingr.h`, `LICENSE` and
+`THIRD-PARTY-NOTICES`, which must ship with any binary built using it.
+
+Use the archive matching the crate version in `Cargo.toml`. A mismatch fails the
+startup `llingr_abi_version` check.
+
+### Configuring a project that depends on the crate
+
+The dependency is the ordinary crates.io one, whichever link-mode is used:
+
+```toml
+# Cargo.toml
+[dependencies]
+llingr-kafka = "0.10"
+```
+
+Source, documentation and editor completion all come from the published crate.
+
+Run this from the project root:
+
+```sh
+# Fetch the artifact into the project
+version=0.10.3
+archive=llingr-engine-${version}-x86_64-unknown-linux-gnu   # pick from the list above
+base=https://github.com/llingr/llingr-rs-kafka/releases/download/v${version}
+
+curl -fsSLO "${base}/${archive}.tar.gz"
+curl -fsSLO "${base}/SHA256SUMS"
+shasum -a 256 -c SHA256SUMS --ignore-missing
+
+# Optional: confirm the archive came from the release workflow, not a mirror.
+gh attestation verify "${archive}.tar.gz" --repo llingr/llingr-rs-kafka
+
+mkdir -p vendor
+tar -xzf "${archive}.tar.gz"
+mv "${archive}" vendor/llingr-engine
+```
+
+Point the build at `vendor/llingr-engine`. Setting `LLINGR_LIB_DIR` in a shell
+works for command-line builds, but an IDE starts cargo in its own environment and
+will not see it, so rust-analyzer and RustRover report a build-script failure.
+Putting the setting in the project's `.cargo/config.toml` fixes both: cargo
+applies `[env]` to every invocation, and the IDE runs cargo. Without
+`relative = true` a build script resolves the path against its own directory
+rather than the project root, and linking might fail:
+
+```toml
+# .cargo/config.toml
+[env]
+LLINGR_LIB_DIR = { value = "vendor/llingr-engine", relative = true }
+```
+
+**Static mode** needs nothing further. Build and ship the single artifact:
+
+```sh
+cargo build --release
+
+mkdir -p deploy
+cp target/release/my-application deploy/
+```
+
+
+**Side-binary mode** needs one addition. The crate's build script emits the two
+RPATH entries, but cargo scopes `rustc-link-arg` to the emitting package's own
+targets, and those entries will not reach a dependent's binary. It will link, then
+fails at startup with `libllingr.so: cannot open shared object file` (Linux) or
+`Library not loaded: @rpath/libllingr.dylib` (macOS). Add it with rustflags in
+the same config:
+
+```toml
+# .cargo/config.toml
+[env]
+LLINGR_LIB_DIR = { value = "vendor/llingr-engine", relative = true }
+LLINGR_LINK = "shared"
+
+[build]
+rustflags = ["-C", "link-arg=-Wl,-rpath,@loader_path"]   # $ORIGIN on Linux
+```
+
+Then build and ship the pair:
+
+```sh
+cargo build --release
+
+mkdir -p deploy
+cp target/release/my-application vendor/llingr-engine/libllingr.so deploy/
+```
+
+RPATH resolves the engine beside the binary at startup, so the deployed pair
+runs from any directory with no `LD_LIBRARY_PATH`, no `ldconfig`, and no system
+install.
+
+A project that already has a `build.rs` can derive this instead of hard-coding
+it. `llingr-kafka` declares `links = "llingr"`, so its build script's metadata
+arrives as `DEP_LLINGR_*` variables:
+
+```rust
+// build.rs
+fn main() {
+    if std::env::var("DEP_LLINGR_LINK").as_deref() == Ok("shared") {
+        let origin = std::env::var("DEP_LLINGR_RPATH_ORIGIN").unwrap();
+        println!("cargo::rustc-link-arg=-Wl,-rpath,{origin}");
+    }
+}
+```
+
+`DEP_LLINGR_LIB_DIR` carries the resolved engine directory in both link modes,
+for a build script that copies the library into a staging directory.
 
 ## Using the Makefile
 
