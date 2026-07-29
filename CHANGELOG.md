@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.4](https://github.com/llingr/llingr-rs-kafka/compare/v0.10.3...v0.10.4) - 2026-07-29
+
+### Fixed
+
+- track llingr-demux v0.12.2
+
+### Other
+
+- release v0.10.3
+
 ## [0.10.3](https://github.com/llingr/llingr-rs-kafka/compare/v0.10.2...v0.10.3) - 2026-07-29
 
 ### Fixed
