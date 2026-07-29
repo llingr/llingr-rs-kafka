@@ -8,7 +8,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/credentials v1.19.29
 	github.com/aws/aws-sdk-go-v2/service/sts v1.44.1
 	github.com/llingr/llingr-adapter-franz v0.14.0
-	github.com/llingr/llingr-demux v0.12.0
+	github.com/llingr/llingr-demux v0.12.2
 	github.com/llingr/llingr-nexus v0.11.0
 	github.com/twmb/franz-go v1.21.5
 	golang.org/x/oauth2 v0.36.0
