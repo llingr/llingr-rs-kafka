@@ -16,7 +16,7 @@
 //   3. LLINGR_LIB_DIR set   -> link the prebuilt libllingr.a found there and
 //                              skip Go entirely (CI caching, air-gapped hosts,
 //                              `make engine` consumers).
-//   4. otherwise            -> require Go 1.25+ on PATH, map the cargo target
+//   4. otherwise            -> require Go 1.26+ on PATH, map the cargo target
 //                              to GOOS/GOARCH, and `go build` the bridge into
 //                              OUT_DIR as a c-archive.
 //
@@ -130,7 +130,7 @@ fn main() {
         );
     }
 
-    require_go_1_25();
+    require_go_1_26();
 
     let out_dir = PathBuf::from(std::env::var("OUT_DIR").unwrap());
     let bridge = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("bridge");
@@ -308,9 +308,9 @@ fn emit_link(dir: &Path) {
     }
 }
 
-fn require_go_1_25() {
+fn require_go_1_26() {
     const OPTIONS: &str = "llingr-kafka compiles its Go engine during `cargo build`. Four \
-         options: (1) install Go 1.25+ from https://go.dev/dl/, (2) download a prebuilt engine \
+         options: (1) install Go 1.26+ from https://go.dev/dl/, (2) download a prebuilt engine \
          from https://github.com/llingr/llingr-rs-kafka/releases and set LLINGR_LIB_DIR to the \
          extracted directory, (3) build the engine once with `make engine` (uses Docker) and \
          set LLINGR_LIB_DIR=dist/<target-triple>, or (4) build the whole application inside \
@@ -321,7 +321,7 @@ fn require_go_1_25() {
         .output()
         .unwrap_or_else(|_| panic!("Go toolchain not found on PATH. {OPTIONS}"));
     let text = String::from_utf8_lossy(&out.stdout);
-    // "go version go1.25.0 linux/arm64"
+    // "go version go1.26.0 linux/arm64"
     let ver = text
         .split_whitespace()
         .nth(2)
@@ -331,7 +331,7 @@ fn require_go_1_25() {
     let major: u32 = parts.next().unwrap_or("0").parse().unwrap_or(0);
     let minor: u32 = parts.next().unwrap_or("0").parse().unwrap_or(0);
     assert!(
-        major > 1 || (major == 1 && minor >= 25),
-        "Go 1.25+ is required for the engine build, found {ver}. {OPTIONS}"
+        major > 1 || (major == 1 && minor >= 26),
+        "Go 1.26+ is required for the engine build, found {ver}. {OPTIONS}"
     );
 }

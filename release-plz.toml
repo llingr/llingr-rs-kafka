@@ -7,6 +7,9 @@ publish = false
 git_release_enable = false
 git_tag_enable = true
 git_tag_name = "v{{ version }}"
+# feat increments the minor on 0.x too, the rule the Go libraries' auto-tag
+# follows; Cargo's 0.x default would release it as a patch
+features_always_increment_minor = true
 # The verification build compiles the Go engine; semver-checks would repeat
 # that on every push for little value on an FFI crate.
 semver_check = false

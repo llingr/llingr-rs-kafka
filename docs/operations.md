@@ -130,11 +130,13 @@ signal-handler context.
 
 ## Emergency stop: fast, at the cost of duplicates
 
-`engine.emergency_stop(reason: &str)` stops the engine immediately without
-draining. Nothing in flight is finished and no final commit is made: messages
-being processed at that instant are abandoned uncommitted. On the next start
-those messages are redelivered, so **downstream consumers must tolerate
-duplicates**. This is not a defect; it is the engine's delivery contract.
+`engine.emergency_stop(reason: &str)` stops the engine without draining:
+nothing waits for in-flight work. The stop takes effect asynchronously, so for a
+moment after the call returns, handlers already running and messages already
+handed to a worker may still complete, and their offsets are committed as usual.
+No handler runs after `run()` has returned. Whatever had not completed by then
+is uncommitted, and on the next start it is redelivered, so **downstream
+consumers must tolerate duplicates**. This is not a defect; it is the engine's delivery contract.
 llingr-kafka is at-least-once: a message is delivered at least once, and after
 an emergency stop some messages are delivered again. Design your processing to
 be idempotent (a dedup key, a conditional write, a self-identifying payload) so
@@ -144,9 +146,14 @@ a redelivery is harmless.
 repeatedly: only the first effective call does anything, and later calls are
 no-ops. Unlike `stop()`, it is safe to call from inside a `ProcessHandler` or
 `DeadLetterHandler`, because the emergency path never waits on the worker your
-handler runs on: it abandons that work rather than draining it. The one
+handler runs on. The one
 unchanged rule is the signal-handler rule above: relay through an atomic flag
 and an ordinary thread, never call it from a signal handler.
+
+The engine also implements llingr-nexus's `EmergencyStop` trait, re-exported
+here, so an adapter or a handler crate that should not depend on llingr-kafka
+can hold the engine as `Arc<dyn EmergencyStop>` and call the same
+`emergency_stop`.
 
 Reach for `emergency_stop` when continuing is worse than the duplicates a
 restart will cost: an unrecoverable dependency, a poison condition you have
@@ -158,8 +165,9 @@ restart beats a slow drain.
 Register an optional shutdown handler on the builder to learn why the consumer
 stopped. Its `handle(&self, reason: &str)` method is called exactly once, on
 either path: a graceful `stop()` passes `reason` as `"graceful shutdown"`, and
-an emergency stop passes the `reason` string you supplied to `emergency_stop`
-(an empty string becomes a default description). A thread parked in `run()`
+an emergency stop passes the engine's description, which ends in
+`reason: <reason>` with the string you gave `emergency_stop` (an empty string
+becomes "emergency stop requested by host"). A thread parked in `run()`
 returns once the handler has run and the broker client has been released.
 
 ```rust

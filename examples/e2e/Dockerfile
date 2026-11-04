@@ -1,4 +1,4 @@
-FROM golang:1.25-bookworm AS build
+FROM golang:1.26-bookworm AS build
 
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
       | sh -s -- -y --default-toolchain stable --profile minimal

@@ -282,12 +282,17 @@ func popClientLogLevel(kafkaConfig map[string]string) (*kgo.LogLevel, *bridgeErr
 // franzSecurity (franz_security.go): they are cross-key and assemble into
 // kgo.DialTLSConfig / kgo.SASL as one validated unit.
 var franzOptionKeys = map[string]func(value string) (kgo.Opt, error){
+	// Only where a partition with no committed offset starts. An offset no
+	// longer in the log keeps kgo's default reset, RewindOffset(1m): one minute
+	// before the last record consumed, or the log start if none was.
+	// ConsumeResetOffset would also set that reset to the log start or end,
+	// re-reading or skipping far more than was lost.
 	"auto.offset.reset": func(v string) (kgo.Opt, error) {
 		switch v {
 		case "earliest":
-			return kgo.ConsumeResetOffset(kgo.NewOffset().AtStart()), nil
+			return kgo.ConsumeStartOffset(kgo.NewOffset().AtStart()), nil
 		case "latest":
-			return kgo.ConsumeResetOffset(kgo.NewOffset().AtEnd()), nil
+			return kgo.ConsumeStartOffset(kgo.NewOffset().AtEnd()), nil
 		default:
 			return nil, bridgeErrorf(errBadOption, "auto.offset.reset must be \"earliest\" or \"latest\", got %q", v)
 		}

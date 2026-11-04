@@ -32,7 +32,7 @@ guarantees processing through infrastructure outages, application OOMs etc.
 **How**: The engine is [llingr-demux](https://llingr.io), written in Go with
 TLA+-verified offset and pipeline mechanisms, compiled to a static C archive
 and linked into your binary. The one practical consequence: the first
-`cargo build` needs **Go 1.25+** and a C compiler on the machine or Docker
+`cargo build` needs **Go 1.26+** and a C compiler on the machine or Docker
 container. No Go on the machine? See [Building](#building) where Docker is used
 for packaging.
 
@@ -43,7 +43,7 @@ Visit [https://llingr.io](https://llingr.io) for more background.
 Requirements:
 
  * Rust MSRV 1.78 / edition 2021
- * Go 1.25+
+ * Go 1.26+
  * C compiler
 
 Also Docker to run examples, and for builds where hosts lack the above dependencies.
@@ -198,7 +198,7 @@ Dockerfiles, cross-compilation, and the full decision detail:
 fetching the pinned Go modules. The build script does not shell out to Docker,
 so if Go is missing, the build fails with an error naming four options:
 
-1. **Install Go 1.25+** (and a C compiler); `cargo build` does the rest.
+1. **Install Go 1.26+** (and a C compiler); `cargo build` does the rest.
 2. **Download a prebuilt engine** for the platform from the
    [releases](https://github.com/llingr/llingr-rs-kafka/releases), then
    `LLINGR_LIB_DIR=<extracted dir> cargo build`. No toolchain beyond Rust, and

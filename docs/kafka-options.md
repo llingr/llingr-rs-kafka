@@ -20,7 +20,7 @@ ports across.
 
 | Builder method | Key emitted | Translated to |
 |---|---|---|
-| `auto_offset_reset(AutoOffsetReset)` | `auto.offset.reset` | `kgo.ConsumeResetOffset` |
+| `auto_offset_reset(AutoOffsetReset)` | `auto.offset.reset` | `kgo.ConsumeStartOffset`, the start only. An offset no longer in the log keeps franz-go's `ConsumeResetOffset` default: the log start if nothing was read from the partition yet, otherwise one minute before the last record consumed |
 | `client_id(&str)` | `client.id` | `kgo.ClientID` |
 | `group_instance_id(&str)` | `group.instance.id` | `kgo.InstanceID` (static membership) |
 | `session_timeout(Duration)` | `session.timeout.ms` | `kgo.SessionTimeout` |
@@ -144,7 +144,7 @@ guarantees are excluded rather than offered as footguns.
 | The auto-commit family (`DisableAutoCommit`, `GreedyAutoCommit`, `AutoCommitInterval`, `AutoCommitMarks`, `AutoCommitCallback`) | The adapter forces `DisableAutoCommit`: the engine's gap-buffer committer owns offset commits. The `DemuxConfig` `auto_commit_interval` setting is the cadence control |
 | The rebalance callbacks (`OnPartitionsAssigned`/`Revoked`/`Lost`, `BlockRebalanceOnPoll`, `AdjustFetchOffsetsFn`, `OnOffsetsFetched`) | The adapter installs its own rebalance callbacks to run the engine's drain-before-revoke coordination |
 | Topic selection (`ConsumeTopics`, `ConsumePartitions`, `ConsumeRegex`, `ConsumeExcludeTopics`) | One topic per consumer is the `Builder` contract; the adapter sets the topic |
-| `ConsumeStartOffset` | Explicit start offsets bypass committed group offsets; `auto.offset.reset` is the supported reset policy |
+| `ConsumeStartOffset` beyond `earliest` and `latest`, and `ConsumeResetOffset` | Explicit start offsets bypass committed group offsets; `auto.offset.reset` is the supported start policy, and the data-loss reset stays at franz-go's one-minute rewind |
 | `FetchIsolationLevel(ReadUncommitted)` (`isolation.level=read_uncommitted`) | A guard rail: aborted transactional records would otherwise be processed and committed downstream |
 | `KeepControlRecords` | Control records are transaction and commit machinery the engine must not process |
 | `WithLogger` | The adapter owns the franz-go log bridge; `client_log_level` sets its verbosity |

@@ -180,6 +180,11 @@ impl Options {
     // -- client options -----------------------------------------------------
 
     /// Where consumption starts when no committed offset exists.
+    ///
+    /// Only the start. Whatever this is set to, an offset that is no longer in
+    /// the log resumes at the log start when nothing has been read from that
+    /// partition yet, such as a commit that retention deleted, and otherwise
+    /// one minute before the last record consumed.
     pub fn auto_offset_reset(self, reset: AutoOffsetReset) -> Self {
         self.push("auto.offset.reset", reset.as_str().to_string())
     }

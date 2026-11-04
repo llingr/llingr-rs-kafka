@@ -8,7 +8,49 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/twmb/franz-go/pkg/kgo"
 )
+
+// auto.offset.reset sets only the start offset; data loss keeps kgo's
+// one-minute rewind. Read back from a real client, since ConsumeResetOffset
+// would also pass a count of options while silently replacing the rewind.
+func TestAutoOffsetResetSetsOnlyTheStartOffset(t *testing.T) {
+	rewind := kgo.RewindOffset(time.Minute).String()
+	cases := []struct {
+		name  string
+		value string
+		start string
+	}{
+		{"unset", "", kgo.NewOffset().AtStart().String()},
+		{"earliest", "earliest", kgo.NewOffset().AtStart().String()},
+		{"latest", "latest", kgo.NewOffset().AtEnd().String()},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			config := map[string]string{}
+			if tc.value != "" {
+				config["auto.offset.reset"] = tc.value
+			}
+			opts, berr := franzKgoOpts(config)
+			if berr != nil {
+				t.Fatalf("unexpected error: %v", berr)
+			}
+			cl, err := kgo.NewClient(append([]kgo.Opt{kgo.SeedBrokers("127.0.0.1:1")}, opts...)...)
+			if err != nil {
+				t.Fatalf("new client: %v", err)
+			}
+			defer cl.Close()
+
+			if got := cl.OptValue(kgo.ConsumeStartOffset).(kgo.Offset).String(); got != tc.start {
+				t.Errorf("start offset = %s, want %s", got, tc.start)
+			}
+			if got := cl.OptValue(kgo.ConsumeResetOffset).(kgo.Offset).String(); got != rewind {
+				t.Errorf("reset offset = %s, want %s (kgo's data-loss rewind)", got, rewind)
+			}
+		})
+	}
+}
 
 func TestCompiledAdaptersIncludesFranz(t *testing.T) {
 	if slices.Contains(compiledAdapters, "franz") {

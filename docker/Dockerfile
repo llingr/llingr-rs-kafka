@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 The llingr-rs-kafka Authors
 # SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Llingr-Commercial
 #
-# Builder image with both toolchains: Go 1.25, a C compiler for cgo, stable
+# Builder image with both toolchains: Go 1.26, a C compiler for cgo, stable
 # Rust, make, and libclang for abi-check's bindgen. MODE=docker builds run
 # inside it: the repo is bind-mounted at run time and the Makefile re-invokes
 # the requested target with MODE=native, so the image never COPYs repo
@@ -11,7 +11,7 @@
 # branch below and docs/internal/MUSL.md.
 # syntax=docker/dockerfile:1
 
-FROM golang:1.25-bookworm
+FROM golang:1.26-bookworm
 
 # musl seam, one of three with the Makefile and the *-musl branch in build.rs.
 # Keep this message identical to the Makefile's MUSL_MSG.
@@ -21,7 +21,7 @@ RUN if [ "$LIBC" != glibc ]; then \
       exit 1; \
     fi
 
-# golang:1.25-bookworm already provides go, gcc, cc, and curl. Add make, the
+# golang:1.26-bookworm already provides go, gcc, cc, and curl. Add make, the
 # in-container entry point, and libclang-dev for abi-check's bindgen over the
 # cgo-emitted header.
 RUN apt-get update \

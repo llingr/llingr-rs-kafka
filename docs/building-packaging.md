@@ -34,11 +34,11 @@ typical for development; Windows and Alpine Linux packaging is not currently sup
 
 - **Rust toolchain** - 2021 / MSRV 1.78+
 - **C compiler** - compiles CGO interfaces linking the engine into Rust binaries
-- **Go 1.25+** - engine compile-time dependency
+- **Go 1.26+** - engine compile-time dependency
 
 ## Examples 
 
-On Linux, C from `sudo apt-get install -y build-essential`, Go 1.25+ from an
+On Linux, C from `sudo apt-get install -y build-essential`, Go 1.26+ from an
 official tarball (distro Go versions are often outdated), and Rust from rustup.
 
 ### Stock Debian / AMD64
@@ -49,7 +49,7 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 # C
 sudo apt-get update && sudo apt-get install -y build-essential
 # Go
-curl -fsSL -o go.tgz "https://dl.google.com/go/go1.25.12.linux-amd64.tar.gz" \
+curl -fsSL -o go.tgz "https://dl.google.com/go/go1.26.10.linux-amd64.tar.gz" \
   && sudo tar -C /usr/local -xzf go.tgz \
   && echo 'export PATH=$PATH:/usr/local/go/bin' >> ~/.profile \
   && source ~/.profile
@@ -63,7 +63,7 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 # C
 sudo dnf install -y gcc
 # Go
-curl -fsSL -o go.tgz "https://dl.google.com/go/go1.25.12.linux-amd64.tar.gz" \
+curl -fsSL -o go.tgz "https://dl.google.com/go/go1.26.10.linux-amd64.tar.gz" \
   && sudo tar -C /usr/local -xzf go.tgz \
   && echo 'export PATH=$PATH:/usr/local/go/bin' >> ~/.profile \
   && source ~/.profile
@@ -81,7 +81,7 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 # C
 xcode-select --install
 # Go
-curl -fsSL -o go.tgz "https://dl.google.com/go/go1.25.12.darwin-arm64.tar.gz" \
+curl -fsSL -o go.tgz "https://dl.google.com/go/go1.26.10.darwin-arm64.tar.gz" \
   && sudo tar -C /usr/local -xzf go.tgz \
   && echo 'export PATH=$PATH:/usr/local/go/bin' >> ~/.zprofile \
   && source ~/.zprofile
@@ -94,7 +94,7 @@ curl -fsSL -o go.tgz "https://dl.google.com/go/go1.25.12.darwin-arm64.tar.gz" \
 FROM rust:1.83-bookworm AS build
 
 # install Go
-RUN curl -fsSL -o go.tgz "https://dl.google.com/go/go1.25.12.linux-amd64.tar.gz" \
+RUN curl -fsSL -o go.tgz "https://dl.google.com/go/go1.26.10.linux-amd64.tar.gz" \
  && tar -C /usr/local -xzf go.tgz
 ENV PATH=$PATH:/usr/local/go/bin
 
@@ -152,7 +152,7 @@ sandboxes run build scripts constantly and a `cargo build` must stay
 deterministic; if Go is missing it fails with a message suggesting three
 approaches:
 
-1. **Install Go 1.25 or newer** (and a C compiler), then `cargo build` will
+1. **Install Go 1.26 or newer** (and a C compiler), then `cargo build` will
    compile the engine from source as usual.
 2. **Build your whole application inside the provided builder image**
    (`docker/Dockerfile`, which contains both Go and Rust), so the machine
@@ -387,7 +387,7 @@ LINK    ?= static    # static | shared (the engine artifact `make engine` produc
 * `make build` builds the crate; 
 * `make engine` builds the standalone engine for `LLINGR_LIB_DIR` consumers:
   the static archive by default, the shared library with `LINK=shared`.
-  - `MODE=auto` resolves to a native build when Go 1.25+, a C compiler, and cargo are all present, 
+  - `MODE=auto` resolves to a native build when Go 1.26+, a C compiler, and cargo are all present, 
      otherwise builds inside the builder image
   - `MODE=docker` re-invokes the same target with `MODE=native` inside that image**, so the
     containerised build runs identical commands to the native one.
@@ -455,7 +455,7 @@ the darwin recipe sets nothing and there is nothing to leak.
 ## Creating A Build Image
 
 To provision a CI runner or custom container that compiles llingr-kafka, the
-toolchain needs a Go 1.25+ toolchain, Rust at edition 2021 and MSRV 1.78, and a C
+toolchain needs a Go 1.26+ toolchain, Rust at edition 2021 and MSRV 1.78, and a C
 compiler (`gcc` or `clang`); on Linux the default approach uses is glibc.
 
 The franz-only engine links no external C library and there is no librdkafka, so
@@ -467,11 +467,11 @@ on macOS, so the image only supplies the compiler and linker.
 
 The source-of-truth versions live in the repository: the Rust MSRV in
 `Cargo.toml`'s `rust-version` field, and the Go floor in `bridge/go.mod`'s `go`
-directive, currently `go 1.25.0`, with `build.rs` enforcing `>= 1.25`. The proven
+directive, currently `go 1.26.0`, with `build.rs` enforcing `>= 1.26`. The proven
 image recipe is the official Go image plus rustup:
 
 ```dockerfile
-FROM golang:1.25-bookworm
+FROM golang:1.26-bookworm
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
       | sh -s -- -y --default-toolchain stable --profile minimal
 ENV PATH=/root/.cargo/bin:$PATH
@@ -492,7 +492,7 @@ smallest attack surface. The pattern is a single build stage with both toolchain
 a `scratch` runtime stage that copies just the binary:
 
 ```dockerfile
-FROM golang:1.25-bookworm AS build
+FROM golang:1.26-bookworm AS build
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
       | sh -s -- -y --default-toolchain stable --profile minimal
 ENV PATH=/root/.cargo/bin:$PATH

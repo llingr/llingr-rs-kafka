@@ -13,8 +13,8 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use llingr_nexus::{
-    BandwidthMetricsHandler, DeadLetterHandler, LogHandler, MetricsHandler, ProcessHandler,
-    ShutdownHandler,
+    BandwidthMetricsHandler, DeadLetterHandler, EmergencyStop, LogHandler, MetricsHandler,
+    ProcessHandler, ShutdownHandler,
 };
 
 use crate::config::{config_json, BrokerConfig, DemuxConfig};
@@ -618,15 +618,21 @@ impl Llingr {
         unsafe { ffi::llingr_stop() }
     }
 
-    /// Signal emergency shutdown: abandon in-flight work and stop now.
+    /// Signal emergency shutdown: stop without draining in-flight work.
     ///
-    /// Unlike [`stop`](Llingr::stop), nothing is drained and no final commit
-    /// is made: messages in flight are dropped uncommitted and will be
-    /// redelivered after a restart, so downstream consumers must tolerate the
-    /// resulting duplicates. The registered shutdown handler receives
-    /// `reason` exactly once, an empty string becoming a default description,
-    /// and a thread parked in [`run`](Llingr::run) returns once the handler
-    /// has run and the broker client has been released.
+    /// Unlike [`stop`](Llingr::stop), nothing waits for in-flight work. The
+    /// stop takes effect asynchronously: for a moment after this returns,
+    /// handlers already running, and messages already handed to a worker, may
+    /// still complete, and their offsets are committed as usual. No handler
+    /// runs after [`run`](Llingr::run) has returned. Whatever had not
+    /// completed by then is uncommitted and redelivered after a restart, so
+    /// downstream consumers must tolerate the resulting duplicates.
+    ///
+    /// The registered shutdown handler is notified exactly once, with the
+    /// engine's description ending in `reason: <reason>` (an empty `reason`
+    /// becomes "emergency stop requested by host"), and a thread parked in
+    /// [`run`](Llingr::run) returns `Ok` once the handler has run and the
+    /// broker client has been released.
     ///
     /// Safe to call from any thread, in any lifecycle state, repeatedly:
     /// calls after the first effective one are no-ops, and a call that lands
@@ -641,10 +647,22 @@ impl Llingr {
     /// through an atomic flag and a normal thread, exactly as documented on
     /// [`stop`](Llingr::stop).
     pub fn emergency_stop(&self, reason: &str) {
-        unsafe {
-            ffi::llingr_emergency_stop(reason.as_ptr().cast::<c_char>(), reason.len() as c_int)
-        }
+        request_emergency_stop(reason);
     }
+}
+
+/// The same emergency stop as [`Llingr::emergency_stop`], for code that holds
+/// the engine as `Arc<dyn EmergencyStop>` and depends only on llingr-nexus.
+impl EmergencyStop for Llingr {
+    fn emergency_stop(&self, reason: &str) {
+        request_emergency_stop(reason);
+    }
+}
+
+// Shared by the inherent method and the trait impl, so neither can come to
+// call the other and recurse if one is removed
+fn request_emergency_stop(reason: &str) {
+    unsafe { ffi::llingr_emergency_stop(reason.as_ptr().cast::<c_char>(), reason.len() as c_int) }
 }
 
 #[cfg(test)]
@@ -693,6 +711,21 @@ mod tests {
         };
         assert_eq!(err.code(), -1);
         assert!(err.to_string().contains("not initialised"), "{err}");
+    }
+
+    /// The engine handle is shared as `Arc<dyn EmergencyStop>`, and a call
+    /// through it before init reaches the same no-op FFI path as the
+    /// inherent method. The tests/emergency_stop_*.rs programs cover an
+    /// initialised engine, one per process.
+    #[test]
+    fn emergency_stop_through_the_nexus_trait_before_init_is_a_no_op() {
+        let engine: std::sync::Arc<dyn EmergencyStop> =
+            std::sync::Arc::new(Llingr { _private: () });
+        let shared = std::sync::Arc::clone(&engine);
+        std::thread::spawn(move || shared.emergency_stop("too early"))
+            .join()
+            .expect("emergency_stop through the trait must not panic");
+        engine.emergency_stop("");
     }
 
     /// Before init there is no engine instance; the emergency-stop export

@@ -10,7 +10,7 @@
 #   PROFILE release | debug           optimisation level (default release)
 #   LINK    static | shared           engine artifact `make engine` produces
 #
-# MODE=auto builds natively when Go 1.25+, a C compiler, and cargo are all
+# MODE=auto builds natively when Go 1.26+, a C compiler, and cargo are all
 # present, otherwise it builds inside the Docker builder image
 # (docker/Dockerfile). Docker mode re-invokes the SAME make target with
 # MODE=native inside that image, so the native and docker paths run identical
@@ -58,7 +58,7 @@ endif
 
 # --- Toolchain detection (immediate, so `auto` resolves once) ----------------
 
-HAVE_GO    := $(shell command -v go >/dev/null 2>&1 && go version 2>/dev/null | awk '{v=$$3; sub(/^go/,"",v); split(v,a,"."); if (a[1]>1 || (a[1]==1 && a[2]>=25)) print "yes"}')
+HAVE_GO    := $(shell command -v go >/dev/null 2>&1 && go version 2>/dev/null | awk '{v=$$3; sub(/^go/,"",v); split(v,a,"."); if (a[1]>1 || (a[1]==1 && a[2]>=26)) print "yes"}')
 HAVE_CC    := $(shell command -v cc >/dev/null 2>&1 && echo yes)
 HAVE_CARGO := $(shell command -v cargo >/dev/null 2>&1 && echo yes)
 HAVE_DOCKER:= $(shell command -v docker >/dev/null 2>&1 && echo yes)
@@ -132,7 +132,7 @@ COMPOSE := docker compose -f examples/e2e/docker-compose.yml
 # registry subdirectory, never all of /root/.cargo, so the toolchain in
 # /root/.cargo/bin is not shadowed.
 define run-in-builder
-	@command -v docker >/dev/null 2>&1 || { echo "error: MODE=$(MODE) resolved to docker but docker is not installed. Install Docker, or install Go 1.25+, a C compiler and Rust for a native build."; exit 1; }
+	@command -v docker >/dev/null 2>&1 || { echo "error: MODE=$(MODE) resolved to docker but docker is not installed. Install Docker, or install Go 1.26+, a C compiler and Rust for a native build."; exit 1; }
 	docker build --build-arg LIBC=$(LIBC) -t $(BUILDER_IMAGE) docker
 	docker run --rm \
 		-v "$(CURDIR)":/work -w /work \
@@ -143,13 +143,13 @@ define run-in-builder
 		make $@ MODE=native LIBC=$(LIBC) PROFILE=$(PROFILE) LINK=$(LINK)
 endef
 
-.PHONY: toolchains engine build test lint docs-check coverage example example-up example-down example-verify clean help
+.PHONY: toolchains engine build test test-broker lint docs-check coverage example example-up example-down example-verify clean help
 
 # --- Targets -----------------------------------------------------------------
 
 toolchains:
 	@echo "Toolchain detection:"
-	@printf '  go     : '; if command -v go >/dev/null 2>&1; then go version; else echo "not found (need 1.25+)"; fi
+	@printf '  go     : '; if command -v go >/dev/null 2>&1; then go version; else echo "not found (need 1.26+)"; fi
 	@printf '  cc     : '; if command -v cc >/dev/null 2>&1; then cc --version | head -1; else echo "not found"; fi
 	@printf '  cargo  : '; if command -v cargo >/dev/null 2>&1; then cargo --version; else echo "not found"; fi
 	@printf '  docker : '; if command -v docker >/dev/null 2>&1; then docker --version; else echo "not found"; fi
@@ -206,6 +206,39 @@ else
 	cd abi-check && cargo build
 endif
 
+# The engine tests that need a broker, tests/emergency_stop_*.rs, against a
+# throwaway Redpanda on 127.0.0.1:19092 with one 3-partition topic of 200 keyed
+# records (RECORDS in tests/common/mod.rs). Each program is its own process, as
+# the engine is one per process, and redelivery reads what while_running saved,
+# so the order matters. Native only: needs Go, cargo and docker. Redpanda is
+# removed whatever the result.
+TEST_REDPANDA := llingr-test-redpanda
+TEST_TOPIC    := emergency-stop-test
+TEST_BROKER_PROGRAMS := emergency_stop_before_run emergency_stop_concurrent \
+	emergency_stop_empty_reason emergency_stop_during_startup \
+	emergency_stop_while_running emergency_stop_redelivery
+
+test-broker:
+	-@docker rm -f $(TEST_REDPANDA) >/dev/null 2>&1
+	docker run -d --rm --name $(TEST_REDPANDA) -p 19092:19092 \
+	  docker.redpanda.com/redpandadata/redpanda:v24.2.7 redpanda start \
+	  --mode dev-container --smp 1 \
+	  --kafka-addr internal://0.0.0.0:9092,external://0.0.0.0:19092 \
+	  --advertise-kafka-addr internal://127.0.0.1:9092,external://127.0.0.1:19092
+	@state=$$(mktemp -d); \
+	trap 'docker rm -f $(TEST_REDPANDA) >/dev/null; rm -rf "$$state"' EXIT; \
+	for i in $$(seq 60); do \
+	  docker exec $(TEST_REDPANDA) rpk cluster health 2>/dev/null | grep -q 'Healthy:.*true' && break; \
+	  sleep 1; \
+	done; \
+	docker exec $(TEST_REDPANDA) rpk topic create $(TEST_TOPIC) -p 3 && \
+	seq 0 199 | awk '{print "key-" $$1 " value-" $$1}' \
+	  | docker exec -i $(TEST_REDPANDA) rpk topic produce $(TEST_TOPIC) -f '%k %v\n' >/dev/null && \
+	for t in $(TEST_BROKER_PROGRAMS); do \
+	  LLINGR_TEST_BROKERS=127.0.0.1:19092 LLINGR_TEST_TOPIC=$(TEST_TOPIC) LLINGR_TEST_STATE="$$state" \
+	    cargo test --locked $(CARGO_PROFILE_FLAG) --test $$t -- --ignored || exit 1; \
+	done
+
 # Prove a build image (or a freshly provisioned host) can actually build AND
 # LINK the engine, not merely that the tools are present. Run it INSIDE the
 # environment you are validating; it is native-only by design (it never shells
@@ -223,7 +256,7 @@ doctor:
 	@echo ""
 	@echo "[1/2] engine: building dist/$(TARGET_TRIPLE)/libllingr.a (Go + cgo + C) ..."
 	@$(MAKE) --no-print-directory engine MODE=native LIBC=$(LIBC) PROFILE=$(PROFILE) \
-	  || { echo ""; echo "NOT PROVISIONED: stage 'engine' failed. Needs Go 1.25+ and a C compiler (cgo)."; exit 1; }
+	  || { echo ""; echo "NOT PROVISIONED: stage 'engine' failed. Needs Go 1.26+ and a C compiler (cgo)."; exit 1; }
 	@echo ""
 	@echo "[2/2] link: compiling and LINKING a test binary against the prebuilt engine ..."
 	@LLINGR_LIB_DIR=dist/$(TARGET_TRIPLE) cargo build --tests --locked \
@@ -312,6 +345,7 @@ help:
 	@echo "  make engine         - build dist/<triple>/libllingr.a alone (LINK=shared: libllingr.so/.dylib) for LLINGR_LIB_DIR / CI cache"
 	@echo "  make build          - build the crate (honours MODE/LIBC/PROFILE)"
 	@echo "  make test           - bridge go test, cargo test, abi-check build"
+	@echo "  make test-broker    - emergency-stop tests against a throwaway Redpanda (native; needs docker)"
 	@echo "  make lint           - cargo fmt --check + clippy -D warnings (same as CI)"
 	@echo "  make docs-check     - compile (not run) every rust sample in README/docs"
 	@echo "  make coverage       - rust (src/*) + go-bridge (bridge/*) coverage; needs Go (tests build the bridge)"

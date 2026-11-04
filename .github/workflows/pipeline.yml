@@ -57,6 +57,12 @@ jobs:
     needs: [lint, reuse, vulncheck]
     uses: ./.github/workflows/ci.yml
 
+  broker:
+    name: Broker tests
+    if: ${{ github.event_name == 'pull_request' && !github.event.repository.private }}
+    needs: [lint, reuse, vulncheck]
+    uses: ./.github/workflows/broker-tests.yml
+
   coverage:
     name: Coverage
     if: ${{ github.event_name == 'pull_request' && !github.event.repository.private }}
