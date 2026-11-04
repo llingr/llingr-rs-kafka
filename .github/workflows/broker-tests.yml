@@ -1,0 +1,28 @@
+name: Broker tests
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  emergency-stop:
+    # tests/emergency_stop_*.rs need a real broker, since build() connects to
+    # it: `make test-broker` starts a throwaway Redpanda in Docker, runs each
+    # program in order and removes it.
+    name: emergency stop (Redpanda)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version: '1.26'
+          cache-dependency-path: bridge/go.sum
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master 2026-07-15
+        with:
+          toolchain: stable
+      - run: make test-broker PROFILE=debug

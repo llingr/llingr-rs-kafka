@@ -118,10 +118,11 @@
 //!   least once on restart, but wasteful. Never call `stop()` from inside a
 //!   process or dead-letter handler; signal another thread.
 //!
-//! - **[`emergency_stop`](Llingr::emergency_stop) abandons in-flight work**:
-//!   no drain, no final commit, and duplicates on restart are expected; the
-//!   engine's contract is at-least-once. The shutdown handler receives the
-//!   reason exactly once, on graceful and emergency exits alike.
+//! - **[`emergency_stop`](Llingr::emergency_stop) does not drain**: `run()`
+//!   returns without waiting for in-flight work, whatever had not completed
+//!   is redelivered on restart, and duplicates are expected; the engine's
+//!   contract is at-least-once. The shutdown handler is notified exactly
+//!   once, on graceful and emergency exits alike.
 //!
 //! - **Liveness is your responsibility.** If a handler stalls, nothing
 //!   crashes: `run()` simply blocks. The engine's own resilience covers the
@@ -179,6 +180,6 @@ pub use snapshot::Snapshot;
 // type internally, the root name `Metrics` belongs to the activation type,
 // and engine logs always flow to the `log` facade.
 pub use llingr_nexus::{
-    AutoOffsetReset, DeadLetterHandler, Header, Headers, Message, ProcessHandler, ShutdownHandler,
-    Timestamp, Traits,
+    AutoOffsetReset, DeadLetterHandler, EmergencyStop, Header, Headers, Message, ProcessHandler,
+    ShutdownHandler, Timestamp, Traits,
 };

@@ -43,7 +43,7 @@ targets = ["x86_64-unknown-linux-gnu"]
 [dependencies]
 # The stable, permissively licensed contract layer shared by every llingr
 # crate: Message, Traits, the handler traits. Published on crates.io.
-llingr-nexus = "0.10.0"
+llingr-nexus = "0.10.2"
 # Engine log lines route to the process-global `log` facade, target "llingr".
 log = "0.4"
 # Baked-in Prometheus metrics, activated at runtime via Metrics::serve /

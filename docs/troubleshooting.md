@@ -9,12 +9,12 @@ it.
 
 ## Build-time failures
 
-**"Go toolchain not found on PATH" or "Go 1.25+ is required for the engine
+**"Go toolchain not found on PATH" or "Go 1.26+ is required for the engine
 build".** llingr-kafka compiles its Go engine during `cargo build`, so the build
-needs Go 1.25 or newer (and a C compiler for cgo). The build script fails with
+needs Go 1.26 or newer (and a C compiler for cgo). The build script fails with
 one of these messages and names four options, any of which fixes it:
 
-1. Install Go 1.25 or newer (from `https://go.dev/dl/`) and a C compiler, then
+1. Install Go 1.26 or newer (from `https://go.dev/dl/`) and a C compiler, then
    `cargo build` compiles the engine from source.
 2. Download a prebuilt engine for the platform from the
    [releases](https://github.com/llingr/llingr-rs-kafka/releases) and set
