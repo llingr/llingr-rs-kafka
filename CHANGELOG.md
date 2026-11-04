@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0](https://github.com/llingr/llingr-rs-kafka/compare/v0.10.6...v0.11.0) - 2026-11-04
+
+### Added
+
+- *(engine)* implement llingr-nexus EmergencyStop, on franz adapter v0.15.1
+
 ## [0.10.6](https://github.com/llingr/llingr-rs-kafka/compare/v0.10.5...v0.10.6) - 2026-07-29
 
 ### Fixed
